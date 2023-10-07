@@ -1,56 +1,106 @@
-# console_tools
+Sure, here's a README.md documentation template for your ASCIIColors utility:
 
-[![PyPI version](https://badge.fury.io/py/console-tools.svg)](https://badge.fury.io/py/console-tools)
+# ASCIIColors
 
-**console_tools** is a Python library for enhancing console output with colors, styles, and exception handling, making it easy to create visually appealing command-line interfaces.
+ASCIIColors is a Python utility that provides an easy way to add color and style to text output in the console. It offers a simple interface for printing text with various colors and styles, making it especially useful for enhancing the readability of console-based applications or adding emphasis to specific messages.
 
-## Features
+## Table of Contents
 
-- Display text on the console with various text colors and styles.
-- Handle exceptions gracefully and display error messages in a user-friendly manner.
-- Simplify console formatting for improved readability.
+- [Installation](#installation)
+- [Usage](#usage)
+- [Methods](#methods)
+- [Examples](#examples)
+- [Contributing](#contributing)
+- [License](#license)
 
 ## Installation
 
-You can install **console_tools** via pip:
+You can install ASCIIColors via `pip` from the Python Package Index (PyPI):
 
 ```bash
-pip install console-tools
+pip install ascii_colors
 ```
 
 ## Usage
 
-Here's a quick example of how to use **console_tools**:
+ASCIIColors provides a set of methods for printing text with different colors and styles. Here's a basic example of how to use it:
 
 ```python
-from console_tools import colored_print, handle_exception
+from asciicolors import ASCIIColors
 
-try:
-    # Some code that might raise an exception
-    result = 10 / 0
-except ZeroDivisionError as e:
-    handle_exception(e)
-
-colored_print("This is a colored message.", color="green", style="bold")
-colored_print("This is an error message.", color="red", style="underline")
+# Print text in bright red color
+ASCIIColors.print("Hello, world!", ASCIIColors.color_bright_red)
 ```
 
-For more detailed usage instructions, refer to the [documentation](https://github.com/ParisNeo/console_tools).
+## Methods
+
+ASCIIColors provides the following methods for formatting and printing text:
+
+- `print(text, color=color_bright_red, style="", end="\n", flush=False)`: Prints text with the specified color and style.
+
+- `warning(text, end="\n", flush=False)`: Prints text in a warning style.
+
+- `error(text, end="\n", flush=False)`: Prints text in an error style.
+
+- `success(text, end="\n", flush=False)`: Prints text in a success style.
+
+- `info(text, end="\n", flush=False)`: Prints text in an info style.
+
+- `red(text, end="\n", flush=False)`: Prints text in red color.
+
+- `green(text, end="\n", flush=False)`: Prints text in green color.
+
+- `blue(text, end="\n", flush=False)`: Prints text in blue color.
+
+- `yellow(text, end="\n", flush=False)`: Prints text in yellow color.
+
+- `magenta(text, end="\n", flush=False)`: Prints text in magenta color.
+
+- `cyan(text, end="\n", flush=False)`: Prints text in cyan color.
+
+- `bold(text, color=color_bright_red, end="\n", flush=False)`: Prints text in bold style with the specified color.
+
+- `underline(text, color=color_bright_red, end="\n", flush=False)`: Prints text with an underline style and the specified color.
+
+- `activate(color_or_style)`: Activates a specific color or style for subsequent text printing.
+
+- `reset()`: Resets the color and style settings to their default values.
+
+- `resetColor()`: Resets the color settings to their default value.
+
+- `resetStyle()`: Resets the style settings to their default value.
+
+- `resetAll()`: Resets both color and style settings to their default values.
+
+## Examples
+
+Here are some examples of how to use ASCIIColors to enhance your console output:
+
+```python
+from asciicolors import ASCIIColors
+
+# Print an error message
+ASCIIColors.error("This is an error message")
+
+# Print a success message
+ASCIIColors.success("Operation successful")
+
+# Print a warning message
+ASCIIColors.warning("Warning: This action cannot be undone")
+
+# Print text in bold and underline style
+ASCIIColors.bold("Important message", ASCIIColors.color_bright_blue)
+ASCIIColors.underline("Underlined text", ASCIIColors.color_bright_green)
+```
 
 ## Contributing
 
-If you'd like to contribute to **console_tools**, please check out the [Contribution Guidelines](CONTRIBUTING.md) for more information.
+Contributions to ASCIIColors are welcome! If you have ideas for improvements or new features, please feel free to open an issue or submit a pull request. Make sure to follow the [contribution guidelines](CONTRIBUTING.md).
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+ASCIIColors is licensed under the [Apache License 2.0](LICENSE). You are free to use, modify, and distribute this utility as per the terms of the license.
 
-## Authors
+---
 
-- ParisNeo (@ParisNeo) - [GitHub Profile](https://github.com/ParisNeo)
-
-## Acknowledgments
-
-- Special thanks to the Python community for inspiration and support.
-
-Feel free to reach out if you have any questions or encounter issues with the library. Happy coding!
+Feel free to customize and expand this README.md to better fit your project's needs. Make sure to include any additional usage examples, installation instructions, or other relevant information that may be specific to your application.
