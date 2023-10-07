@@ -100,7 +100,3 @@ Contributions to ASCIIColors are welcome! If you have ideas for improvements or 
 ## License
 
 ASCIIColors is licensed under the [Apache License 2.0](LICENSE). You are free to use, modify, and distribute this utility as per the terms of the license.
-
----
-
-Feel free to customize and expand this README.md to better fit your project's needs. Make sure to include any additional usage examples, installation instructions, or other relevant information that may be specific to your application.
