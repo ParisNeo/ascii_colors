@@ -119,6 +119,14 @@ class ASCIIColors:
         print(f"{ASCIIColors.color_bright_blue}{text}{ASCIIColors.color_reset}", end=end, flush=flush)
 
     @staticmethod
+    def black(text, end="\n", flush=False):
+        print(f"{ASCIIColors.color_black}{text}{ASCIIColors.color_reset}", end=end, flush=flush)
+
+    @staticmethod
+    def white(text, end="\n", flush=False):
+        print(f"{ASCIIColors.color_white}{text}{ASCIIColors.color_reset}", end=end, flush=flush)
+
+    @staticmethod
     def red(text, end="\n", flush=False):
         print(f"{ASCIIColors.color_red}{text}{ASCIIColors.color_reset}", end=end, flush=flush)
     @staticmethod
@@ -144,7 +152,44 @@ class ASCIIColors:
     def cyan(text, end="\n", flush=False):
         print(f"{ASCIIColors.color_cyan}{text}{ASCIIColors.color_reset}", end=end, flush=flush)
 
-    
+
+
+    @staticmethod
+    def bright_black(text, end="\n", flush=False):
+        print(f"{ASCIIColors.color_bright_black}{text}{ASCIIColors.color_reset}", end=end, flush=flush)
+
+    @staticmethod
+    def bright_white(text, end="\n", flush=False):
+        print(f"{ASCIIColors.color_bright_white}{text}{ASCIIColors.color_reset}", end=end, flush=flush)
+
+    @staticmethod
+    def bright_red(text, end="\n", flush=False):
+        print(f"{ASCIIColors.color_bright_red}{text}{ASCIIColors.color_reset}", end=end, flush=flush)
+    @staticmethod
+    def bright_orange(text, end="\n", flush=False):
+        print(f"{ASCIIColors.color_bright_orange}{text}{ASCIIColors.color_reset}", end=end, flush=flush)        
+    @staticmethod
+    def bright_green(text, end="\n", flush=False):
+        print(f"{ASCIIColors.color_bright_green}{text}{ASCIIColors.color_reset}", end=end, flush=flush)
+
+    @staticmethod
+    def bright_blue(text, end="\n", flush=False):
+        print(f"{ASCIIColors.color_bright_blue}{text}{ASCIIColors.color_reset}", end=end, flush=flush)
+
+    @staticmethod
+    def bright_yellow(text, end="\n", flush=False):
+        print(f"{ASCIIColors.color_bright_yellow}{text}{ASCIIColors.color_reset}", end=end, flush=flush)
+
+    @staticmethod
+    def bright_magenta(text, end="\n", flush=False):
+        print(f"{ASCIIColors.color_bright_magenta}{text}{ASCIIColors.color_reset}", end=end, flush=flush)
+
+    @staticmethod
+    def bright_cyan(text, end="\n", flush=False):
+        print(f"{ASCIIColors.color_bright_cyan}{text}{ASCIIColors.color_reset}", end=end, flush=flush)
+
+
+
 
     @staticmethod
     def bold(text, color=color_bright_red, end="\n", flush=False):
