@@ -122,6 +122,9 @@ class ASCIIColors:
     def red(text, end="\n", flush=False):
         print(f"{ASCIIColors.color_red}{text}{ASCIIColors.color_reset}", end=end, flush=flush)
     @staticmethod
+    def orange(text, end="\n", flush=False):
+        print(f"{ASCIIColors.color_orange}{text}{ASCIIColors.color_reset}", end=end, flush=flush)        
+    @staticmethod
     def green(text, end="\n", flush=False):
         print(f"{ASCIIColors.color_green}{text}{ASCIIColors.color_reset}", end=end, flush=flush)
 
