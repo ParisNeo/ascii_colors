@@ -248,4 +248,31 @@ class ASCIIColors:
     @staticmethod
     def resetAll():
         ASCIIColors.reset()
+        
+    @staticmethod
+    def hilight(text, subtext, color, hilight_color, whole_line):
+        """
+        This method takes a text string, another text string to search for inside the first one, the color of the text to print, 
+        the color of the subtext to highlight, and whether or not to highlight a whole line or just the text.
 
+        Args:
+        text (str): The main text string
+        subtext (str): The text to search for inside the main text
+        color (str): The color of the main text
+        hilight_color (str): The color of the subtext to highlight
+        whole_line (bool): Whether to highlight the whole line or just the text
+
+        Returns:
+        None
+        """
+        if whole_line:
+            lines = text.split('\n')
+            for line in lines:
+                if subtext in line:
+                    print(f"{color}{line}{ASCIIColors.color_reset}")
+                else:
+                    print(f"{hilight_color}{line}{ASCIIColors.color_reset}")
+        else:
+            print(f"{color}{text.replace(subtext, f'{hilight_color}{subtext}{color}')}{ASCIIColors.color_reset}")
+
+    
