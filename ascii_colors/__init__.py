@@ -1,4 +1,5 @@
 import traceback
+import os
 
 def get_trace_exception(ex):
     """
@@ -74,10 +75,16 @@ class ASCIIColors:
         """
         print(f"{style}{color}{text}{ASCIIColors.color_reset}", end=end, flush=flush)
         if ASCIIColors.log_path!="":
-            with(ASCIIColors.log_path,"a") as f:
-                f.write(text+"\n")
-
-    @staticmethod
+            if os.path.exists(ASCIIColors.log_path):
+                with open(ASCIIColors.log_path,"a") as f:
+                    f.write(text+end)
+            else:
+                try:
+                    with open(ASCIIColors.log_path,"w") as f:
+                        f.write(text+end)
+                except:
+                    print(f"{ASCIIColors.red}Coudln't create log file, make sure you have the permission to create it or try setting a different path.\nLogging will be disabled.{ASCIIColors.color_reset}")
+                    ASCIIColors.log_path=""    @staticmethod
     def warning(text, end="\n", flush=False):
         """
         Prints text in a warning style.
@@ -288,5 +295,13 @@ class ASCIIColors:
             print(f"{color}{text.replace(subtext, f'{hilight_color}{subtext}{color}')}{ASCIIColors.color_reset}")
 
         if ASCIIColors.log_path!="":
-            with(ASCIIColors.log_path,"a") as f:
-                f.write(text+"\n")
+            try:
+                if os.path.exists(ASCIIColors.log_path):
+                    with open(ASCIIColors.log_path,"a") as f:
+                        f.write(text+"\n")
+                else:
+                    with open(ASCIIColors.log_path,"w") as f:
+                        f.write(text+"\n")
+            except:
+                print(f"{ASCIIColors.red}Coudln't create log file, make sure you have the permission to create it or try setting a different path{ASCIIColors.color_reset}")
+                ASCIIColors.log_path=""
