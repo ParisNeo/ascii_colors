@@ -75,16 +75,18 @@ class ASCIIColors:
         """
         print(f"{style}{color}{text}{ASCIIColors.color_reset}", end=end, flush=flush)
         if ASCIIColors.log_path!="":
-            if os.path.exists(ASCIIColors.log_path):
-                with open(ASCIIColors.log_path,"a") as f:
-                    f.write(text+end)
-            else:
-                try:
-                    with open(ASCIIColors.log_path,"w") as f:
+            try:
+                if os.path.exists(ASCIIColors.log_path):
+                    with open(ASCIIColors.log_path,"a", encoding="utf8") as f:
                         f.write(text+end)
-                except:
-                    print(f"{ASCIIColors.red}Coudln't create log file, make sure you have the permission to create it or try setting a different path.\nLogging will be disabled.{ASCIIColors.color_reset}")
-                    ASCIIColors.log_path=""    @staticmethod
+                else:
+                    with open(ASCIIColors.log_path,"w", encoding="utf8") as f:
+                        f.write(text+end)
+            except:
+                print(f"{ASCIIColors.color_bright_red}Coudln't create log file, make sure you have the permission to create it or try setting a different path.\nLogging will be disabled.{ASCIIColors.color_reset}")
+                ASCIIColors.log_path=""    
+    
+    @staticmethod
     def warning(text, end="\n", flush=False):
         """
         Prints text in a warning style.
@@ -297,11 +299,11 @@ class ASCIIColors:
         if ASCIIColors.log_path!="":
             try:
                 if os.path.exists(ASCIIColors.log_path):
-                    with open(ASCIIColors.log_path,"a") as f:
+                    with open(ASCIIColors.log_path,"a", encoding="utf8") as f:
                         f.write(text+"\n")
                 else:
-                    with open(ASCIIColors.log_path,"w") as f:
+                    with open(ASCIIColors.log_path,"w", encoding="utf8") as f:
                         f.write(text+"\n")
             except:
-                print(f"{ASCIIColors.red}Coudln't create log file, make sure you have the permission to create it or try setting a different path{ASCIIColors.color_reset}")
+                print(f"{ASCIIColors.color_bright_red}Coudln't create log file, make sure you have the permission to create it or try setting a different path{ASCIIColors.color_reset}")
                 ASCIIColors.log_path=""
