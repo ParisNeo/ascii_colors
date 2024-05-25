@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='ascii_colors',
-    version='0.2.2',
+    version='0.3.0',
     description='A Python library for pretty console printing with colors and styles',
     long_description='A Python library for displaying text on the console with colors, styles, and exception handling.',
     author='Saifeddine ALOUI (ParisNeo)',
