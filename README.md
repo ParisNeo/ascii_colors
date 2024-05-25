@@ -1,5 +1,3 @@
-Sure, here's a README.md documentation template for your ASCIIColors utility:
-
 # ASCIIColors
 
 ASCIIColors is a Python utility that provides an easy way to add color and style to text output in the console. It offers a simple interface for printing text with various colors and styles, making it especially useful for enhancing the readability of console-based applications or adding emphasis to specific messages.
@@ -91,7 +89,29 @@ ASCIIColors.warning("Warning: This action cannot be undone")
 # Print text in bold and underline style
 ASCIIColors.bold("Important message", ASCIIColors.color_bright_blue)
 ASCIIColors.underline("Underlined text", ASCIIColors.color_bright_green)
+
+# Use specific colors directly
+ASCIIColors.yellow("Yellow text")
+ASCIIColors.red("Red text")
+ASCIIColors.green("Green text")
+ASCIIColors.cyan("Cyan text")
+
+ASCIIColors.multicolor(["Green text","red text","yellow text"],[ASCIIColors.color_green, ASCIIColors.color_red, ASCIIColors.color_yellow])
 ```
+
+Trace and color your exceptions using `trace_exception`: 
+
+```python
+# Trace all your exceptions using:
+from asciicolors import trace_exception
+
+try:
+    #some nasty stuff that can crush
+except Exception as ex:
+    trace_exception(ex)
+
+```
+
 
 ## Contributing
 
