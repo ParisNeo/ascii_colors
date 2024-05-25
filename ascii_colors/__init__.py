@@ -210,7 +210,12 @@ class ASCIIColors:
         ASCIIColors.print(text, ASCIIColors.color_bright_cyan, end=end, flush=flush)
 
 
-
+    
+    @staticmethod
+    def multicolor(texts:list, colors:list, end="\n", flush=False):
+        for text, color in zip(texts, colors):
+            ASCIIColors.print(text, color, end=end, flush=flush)
+    
 
     @staticmethod
     def bold(text, color=color_bright_red, end="\n", flush=False):
