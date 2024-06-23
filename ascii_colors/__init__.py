@@ -215,7 +215,7 @@ class ASCIIColors:
     def multicolor(texts:list, colors:list, end="\n", flush=False):
         for text, color in zip(texts, colors):
             ASCIIColors.print(text, color, end="", flush=True)
-        print("", color, end=end, flush=flush)
+        print(ASCIIColors.color_reset, color, end=end, flush=flush)
 
     @staticmethod
     def bold(text, color=color_bright_red, end="\n", flush=False):
@@ -312,3 +312,7 @@ class ASCIIColors:
             except:
                 print(f"{ASCIIColors.color_bright_red}Coudln't create log file, make sure you have the permission to create it or try setting a different path{ASCIIColors.color_reset}")
                 ASCIIColors.log_path=""
+
+if __name__=="__main__":
+    # Test colors
+    ASCIIColors.multicolor(["text1 ","text 2"], [ASCIIColors.color_red, ASCIIColors.color_blue])
