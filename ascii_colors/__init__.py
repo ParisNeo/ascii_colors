@@ -276,7 +276,7 @@ class ASCIIColors:
         ASCIIColors.reset()
         
     @staticmethod
-    def hilight(text, subtext, color, hilight_color, whole_line):
+    def hilight(text:str, subtext:str, color:str='\u001b[33m', hilight_color:str='\u001b[31m', whole_line:bool=False):
         """
         This method takes a text string, another text string to search for inside the first one, the color of the text to print, 
         the color of the subtext to highlight, and whether or not to highlight a whole line or just the text.
