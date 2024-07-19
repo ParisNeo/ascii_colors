@@ -1,5 +1,6 @@
 import traceback
 import os
+from typing import List, Union
 
 def get_trace_exception(ex):
     """
@@ -276,43 +277,47 @@ class ASCIIColors:
         ASCIIColors.reset()
         
     @staticmethod
-    def hilight(text:str, subtext:str, color:str='\u001b[33m', hilight_color:str='\u001b[31m', whole_line:bool=False):
+    def highlight(text: str, subtext: Union[str, List[str]], color: str = '\u001b[33m', highlight_color: str = '\u001b[31m', whole_line: bool = False):
         """
-        This method takes a text string, another text string to search for inside the first one, the color of the text to print, 
-        the color of the subtext to highlight, and whether or not to highlight a whole line or just the text.
+        This method takes a text string, another text string or a list of text strings to search for inside the first one,
+        the color of the text to print, the color of the subtext to highlight, and whether or not to highlight a whole line or just the text.
 
         Args:
         text (str): The main text string
-        subtext (str): The text to search for inside the main text
+        subtext (Union[str, List[str]]): The text or list of texts to search for inside the main text
         color (str): The color of the main text
-        hilight_color (str): The color of the subtext to highlight
+        highlight_color (str): The color of the subtext to highlight
         whole_line (bool): Whether to highlight the whole line or just the text
 
         Returns:
         None
         """
+        if isinstance(subtext, str):
+            subtext = [subtext]
+
         if whole_line:
             lines = text.split('\n')
             for line in lines:
-                if subtext in line:
+                if any(st in line for st in subtext):
+                    print(f"{highlight_color}{line}{ASCIIColors.color_reset}")
+                else:
                     print(f"{color}{line}{ASCIIColors.color_reset}")
-                else:
-                    print(f"{hilight_color}{line}{ASCIIColors.color_reset}")
         else:
-            print(f"{color}{text.replace(subtext, f'{hilight_color}{subtext}{color}')}{ASCIIColors.color_reset}")
+            for st in subtext:
+                text = text.replace(st, f'{highlight_color}{st}{color}')
+            print(f"{color}{text}{ASCIIColors.color_reset}")
 
-        if ASCIIColors.log_path!="":
+        if ASCIIColors.log_path:
             try:
-                if os.path.exists(ASCIIColors.log_path):
-                    with open(ASCIIColors.log_path,"a", encoding="utf8") as f:
-                        f.write(text+"\n")
-                else:
-                    with open(ASCIIColors.log_path,"w", encoding="utf8") as f:
-                        f.write(text+"\n")
-            except:
-                print(f"{ASCIIColors.color_bright_red}Coudln't create log file, make sure you have the permission to create it or try setting a different path{ASCIIColors.color_reset}")
-                ASCIIColors.log_path=""
+                log_path = Path(ASCIIColors.log_path)
+                log_path.parent.mkdir(parents=True, exist_ok=True)
+                with log_path.open("a", encoding="utf8") as f:
+                    f.write(text + "\n")
+            except Exception as e:
+                print(f"{ASCIIColors.color_bright_red}Couldn't create log file: {e}{ASCIIColors.color_reset}")
+                ASCIIColors.log_path = ""
 
 if __name__=="__main__":
     # Test colors
     ASCIIColors.multicolor(["text1 ","text 2"], [ASCIIColors.color_red, ASCIIColors.color_blue])
+    ASCIIColors.highlight("ParisNeo: Hello Lollms how you doing man?\nLoLLMs: I'm fine. What do you need?\nParisNeo: Nothin special. Just testing the ASCII_COLORS library.\nLoLLMs: OK, I ope it tests fine :)",["ParisNeo", "LoLLMs"])
