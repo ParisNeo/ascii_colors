@@ -1,6 +1,8 @@
 import traceback
 import os
-from typing import List, Union
+import threading
+import time
+from typing import List, Union, Callable, Any, Optional
 
 def get_trace_exception(ex):
     """
@@ -317,7 +319,61 @@ class ASCIIColors:
                 print(f"{ASCIIColors.color_bright_red}Couldn't create log file: {e}{ASCIIColors.color_reset}")
                 ASCIIColors.log_path = ""
 
+    @staticmethod
+    def execute_with_animation(pending_text: str, func: Callable, *args, color: Optional[str] = None, **kwargs) -> Any:
+        """
+        Executes a function while displaying a pending text with an animation.
+        
+        Args:
+            pending_text (str): The text to display while the function is executing.
+            func (Callable): The function to execute.
+            *args: Positional arguments to pass to the function.
+            color (Optional[str]): Color to use for the pending text and animation. Defaults to yellow if not specified.
+            **kwargs: Keyword arguments to pass to the function.
+        
+        Returns:
+            Any: The return value of the executed function.
+        """
+        animation = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+        stop_event = threading.Event()
+        result = None
+        
+        # Default to yellow if no color is specified
+        text_color = color if color else ASCIIColors.color_yellow
+        
+        def animate():
+            idx = 0
+            while not stop_event.is_set():
+                print(f"\r{text_color}{pending_text} {animation[idx % len(animation)]}{ASCIIColors.color_reset}  ", end="", flush=True)
+                idx += 1
+                time.sleep(0.1)
+        
+        animation_thread = threading.Thread(target=animate)
+        animation_thread.start()
+        
+        try:
+            result = func(*args, **kwargs)
+        finally:
+            stop_event.set()
+            animation_thread.join()
+            print(f"\r{' ' * (len(pending_text) + 2)}", end="\r")  # Clear the line
+        
+        return result
+
 if __name__=="__main__":
     # Test colors
     ASCIIColors.multicolor(["text1 ","text 2"], [ASCIIColors.color_red, ASCIIColors.color_blue])
     ASCIIColors.highlight("ParisNeo: Hello Lollms how you doing man?\nLoLLMs: I'm fine. What do you need?\nParisNeo: Nothin special. Just testing the ASCII_COLORS library.\nLoLLMs: OK, I ope it tests fine :)",["ParisNeo", "LoLLMs"])
+    def some_long_running_function(param1, param2):
+        # Simulating a long-running operation
+        time.sleep(5)
+        return f"Result: {param1} + {param2}"
+
+    result = ASCIIColors.execute_with_animation(
+        "Processing...",
+        some_long_running_function,
+        "Hello",
+        "World",
+        color=ASCIIColors.color_cyan
+    )
+    print(result)
