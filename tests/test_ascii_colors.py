@@ -1,7 +1,6 @@
 # tests/test_ascii_colors.py
 import tempfile
 import unittest
-from datetime import datetime
 from pathlib import Path
 
 from ascii_colors import ASCIIColors, LogLevel

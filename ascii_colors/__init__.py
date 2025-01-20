@@ -190,15 +190,14 @@ class ASCIIColors:
 
         Args:
             text: The message to print
-            **kwargs: Additional template variables. If 'color' is provided, 
+            **kwargs: Additional template variables. If 'color' is provided,
                     it will be used instead of the default info color
         """
         if cls._log_level <= LogLevel.INFO:
             # Extract color if provided, otherwise use default
-            color = kwargs.pop('color', cls._level_colors[LogLevel.INFO])
+            color = kwargs.pop("color", cls._level_colors[LogLevel.INFO])
             formatted = cls._format_message(LogLevel.INFO, text, **kwargs)
             cls.print(formatted, color)
-
 
     @classmethod
     def warning(cls, text: str, **kwargs) -> None:
@@ -424,14 +423,9 @@ class ASCIIColors:
                 text = text.replace(st, f"{highlight_color}{st}{color}")
             ASCIIColors.print(f"{color}{text}{ASCIIColors.color_reset}")
 
-
     @staticmethod
     def execute_with_animation(
-        pending_text: str, 
-        func: Callable, 
-        *args, 
-        color: Optional[str] = None, 
-        **kwargs
+        pending_text: str, func: Callable, *args, color: Optional[str] = None, **kwargs
     ) -> Any:
         """
         Executes a function while displaying a pending text with an animation,
@@ -441,7 +435,7 @@ class ASCIIColors:
             pending_text (str): The text to display while the function is executing.
             func (Callable): The function to execute.
             *args: Positional arguments to pass to the function.
-            color (Optional[str]): Color to use for the pending text and animation. 
+            color (Optional[str]): Color to use for the pending text and animation.
                                 Defaults to yellow if not specified.
             **kwargs: Keyword arguments to pass to the function.
 
@@ -478,11 +472,10 @@ class ASCIIColors:
             # Clear the line and show completion with checkbox
             print(
                 f"\r{text_color}{pending_text} {ASCIIColors.color_green}{checkbox}{ASCIIColors.color_reset}",
-                flush=True
+                flush=True,
             )
 
         return result
-
 
 
 if __name__ == "__main__":
