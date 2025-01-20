@@ -1,13 +1,15 @@
 # ASCIIColors
 
-ASCIIColors is a Python utility that provides an easy way to add color and style to text output in the console. It offers a simple interface for printing text with various colors and styles, making it especially useful for enhancing the readability of console-based applications or adding emphasis to specific messages.
+ASCIIColors is a Python utility that provides an easy way to add color and style to text output in the console. It offers a simple interface for printing text with various colors and styles, making it especially useful for enhancing the readability of console-based applications or adding emphasis to specific messages. It also includes advanced logging capabilities with customizable templates, log levels, and file logging support.
 
 ## Table of Contents
 
 - [Installation](#installation)
-- [Usage](#usage)
-- [Methods](#methods)
-- [Examples](#examples)
+- [Basic Usage](#basic-usage)
+- [Standard Methods](#standard-methods)
+- [Colors and Styles](#colors-and-styles)
+- [Advanced Logging](#advanced-logging)
+- [Development](#development)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -19,9 +21,9 @@ You can install ASCIIColors via `pip` from the Python Package Index (PyPI):
 pip install ascii_colors
 ```
 
-## Usage
+## Basic Usage
 
-ASCIIColors provides a set of methods for printing text with different colors and styles. Here's a basic example of how to use it:
+ASCIIColors provides a set of methods for printing text with different colors and styles:
 
 ```python
 from asciicolors import ASCIIColors
@@ -30,93 +32,185 @@ from asciicolors import ASCIIColors
 ASCIIColors.print("Hello, world!", ASCIIColors.color_bright_red)
 ```
 
-## Methods
+## Standard Methods
 
 ASCIIColors provides the following methods for formatting and printing text:
 
 - `print(text, color=color_bright_red, style="", end="\n", flush=False)`: Prints text with the specified color and style.
-
 - `warning(text, end="\n", flush=False)`: Prints text in a warning style.
-
 - `error(text, end="\n", flush=False)`: Prints text in an error style.
-
 - `success(text, end="\n", flush=False)`: Prints text in a success style.
-
 - `info(text, end="\n", flush=False)`: Prints text in an info style.
 
-- `red(text, end="\n", flush=False)`: Prints text in red color.
+Color-specific methods:
+- `red(text, end="\n", flush=False)`
+- `green(text, end="\n", flush=False)`
+- `blue(text, end="\n", flush=False)`
+- `yellow(text, end="\n", flush=False)`
+- `magenta(text, end="\n", flush=False)`
+- `cyan(text, end="\n", flush=False)`
 
-- `green(text, end="\n", flush=False)`: Prints text in green color.
+Style methods:
+- `bold(text, color=color_bright_red, end="\n", flush=False)`
+- `underline(text, color=color_bright_red, end="\n", flush=False)`
 
-- `blue(text, end="\n", flush=False)`: Prints text in blue color.
+Control methods:
+- `activate(color_or_style)`
+- `reset()`
+- `resetColor()`
+- `resetStyle()`
+- `resetAll()`
 
-- `yellow(text, end="\n", flush=False)`: Prints text in yellow color.
+## Colors and Styles
 
-- `magenta(text, end="\n", flush=False)`: Prints text in magenta color.
-
-- `cyan(text, end="\n", flush=False)`: Prints text in cyan color.
-
-- `bold(text, color=color_bright_red, end="\n", flush=False)`: Prints text in bold style with the specified color.
-
-- `underline(text, color=color_bright_red, end="\n", flush=False)`: Prints text with an underline style and the specified color.
-
-- `activate(color_or_style)`: Activates a specific color or style for subsequent text printing.
-
-- `reset()`: Resets the color and style settings to their default values.
-
-- `resetColor()`: Resets the color settings to their default value.
-
-- `resetStyle()`: Resets the style settings to their default value.
-
-- `resetAll()`: Resets both color and style settings to their default values.
-
-## Examples
-
-Here are some examples of how to use ASCIIColors to enhance your console output:
-
+Available colors:
 ```python
-from asciicolors import ASCIIColors
+# Regular colors
+color_black
+color_red
+color_green
+color_yellow
+color_blue
+color_magenta
+color_cyan
+color_white
+color_orange
 
-# Print an error message
-ASCIIColors.error("This is an error message")
+# Bright colors
+color_bright_black
+color_bright_red
+color_bright_green
+color_bright_yellow
+color_bright_blue
+color_bright_magenta
+color_bright_cyan
+color_bright_white
+color_bright_orange
 
-# Print a success message
-ASCIIColors.success("Operation successful")
-
-# Print a warning message
-ASCIIColors.warning("Warning: This action cannot be undone")
-
-# Print text in bold and underline style
-ASCIIColors.bold("Important message", ASCIIColors.color_bright_blue)
-ASCIIColors.underline("Underlined text", ASCIIColors.color_bright_green)
-
-# Use specific colors directly
-ASCIIColors.yellow("Yellow text")
-ASCIIColors.red("Red text")
-ASCIIColors.green("Green text")
-ASCIIColors.cyan("Cyan text")
-
-ASCIIColors.multicolor(["Green text","red text","yellow text"],[ASCIIColors.color_green, ASCIIColors.color_red, ASCIIColors.color_yellow])
+# Styles
+style_bold
+style_underline
 ```
 
-Trace and color your exceptions using `trace_exception`: 
+## Advanced Logging
+
+### Log Levels
+
+ASCIIColors now supports four log levels:
 
 ```python
-# Trace all your exceptions using:
+from ascii_colors import LogLevel
+
+LogLevel.DEBUG    # Detailed information for debugging
+LogLevel.INFO     # General information
+LogLevel.WARNING  # Warning messages
+LogLevel.ERROR    # Error messages
+
+# Set minimum log level
+ASCIIColors.set_log_level(LogLevel.WARNING)  # Only show WARNING and ERROR messages
+```
+
+### Customizable Templates
+
+You can customize the message format for each log level:
+
+```python
+# Custom template with datetime and additional fields
+ASCIIColors.set_template(
+    LogLevel.INFO,
+    "ℹ️ {datetime} | {message} | {custom_field}"
+)
+
+# Using the template
+ASCIIColors.info("Hello", custom_field="test")
+# Output: ℹ️ 2025-01-12 21:38:05 | Hello | test
+```
+
+### File Logging
+
+Enable logging to a file:
+
+```python
+# Set up file logging
+ASCIIColors.set_log_file("logs/app.log")
+
+# All subsequent messages will be written to both console and file
+ASCIIColors.info("This message is logged to file")
+```
+
+## Exception Tracing
+
+Trace and color your exceptions:
+
+```python
 from asciicolors import trace_exception
 
 try:
-    #some nasty stuff that can crush
+    # some code that might raise an exception
+    pass
 except Exception as ex:
     trace_exception(ex)
-
 ```
 
+## Multicolor Text
+
+Print text with multiple colors:
+
+```python
+ASCIIColors.multicolor(
+    ["Green text", "red text", "yellow text"],
+    [ASCIIColors.color_green, ASCIIColors.color_red, ASCIIColors.color_yellow]
+)
+```
+
+## Development
+
+To set up the development environment:
+
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/ascii_colors.git
+cd ascii_colors
+
+# Install development dependencies
+pip install -r requirements-dev.txt
+
+# Install pre-commit hooks
+pre-commit install
+```
+
+### Running Tests
+
+```bash
+python -m pytest tests/
+```
+
+### Type Checking
+
+```bash
+mypy ascii_colors.py
+```
 
 ## Contributing
 
-Contributions to ASCIIColors are welcome! If you have ideas for improvements or new features, please feel free to open an issue or submit a pull request. Make sure to follow the [contribution guidelines](CONTRIBUTING.md).
+Contributions to ASCIIColors are welcome! If you have ideas for improvements or new features, please feel free to open an issue or submit a pull request. Make sure to follow the contribution guidelines.
 
 ## License
 
-ASCIIColors is licensed under the [Apache License 2.0](LICENSE). You are free to use, modify, and distribute this utility as per the terms of the license.
+ASCIIColors is licensed under the Apache License 2.0. See the [LICENSE](LICENSE) file for details.
+
+## Changelog
+
+### v0.5.0
+- Added log levels (DEBUG, INFO, WARNING, ERROR)
+- Added customizable message templates
+- Added file logging support
+- Added thread-safe operations
+- Added comprehensive type hints
+- Added unit tests
+- Added pre-commit configuration
+
+### v0.0.1
+- Initial release with basic color support
+- Basic print methods
+- Simple styling options
