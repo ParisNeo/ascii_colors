@@ -1,422 +1,482 @@
-# ASCIIColors 🎨
+# ASCIIColors v0.6.0
 
-[![PyPI version](https://badge.fury.io/py/ascii_colors.svg)](https://badge.fury.io/py/ascii_colors)
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Python Versions](https://img.shields.io/pypi/pyversions/ascii_colors.svg)](https://pypi.org/project/ascii_colors/)
+ASCIIColors is a Python library designed for rich terminal output. It provides an easy way to add color and style to text, alongside a flexible and powerful logging system that surpasses basic needs while remaining intuitive. It features multiple handlers (console, file, rotating files), customizable formatters (including JSON), thread-local context management, and utility functions for enhanced console applications.
 
-**ASCIIColors** is a versatile Python library designed to simplify the process of adding color, style, and structure to your console output. Whether you need simple colored text, styled messages, sophisticated logging with levels and file output, or helpful utilities like progress animations and text highlighting, ASCIIColors provides an intuitive API to enhance your command-line applications.
+## Table of Contents
 
-## ✨ Features
+- [Installation](#installation)
+- [Quick Start: Logging](#quick-start-logging)
+- [Basic Color Printing (Legacy)](#basic-color-printing-legacy)
+- [Core Logging Concepts](#core-logging-concepts)
+  - [Log Levels](#log-levels)
+  - [Handlers](#handlers)
+  - [Formatters](#formatters)
+  - [Context Management](#context-management)
+- [Advanced Usage Examples](#advanced-usage-examples)
+  - [Multiple Handlers (Console & File)](#multiple-handlers-console--file)
+  - [Rotating Log Files](#rotating-log-files)
+  - [JSON Logging](#json-logging)
+  - [Custom Formatting with Context](#custom-formatting-with-context)
+- [Utility Functions](#utility-functions)
+  - [Exception Tracing](#exception-tracing)
+  - [Multicolor Text](#multicolor-text)
+  - [Highlighting Text](#highlighting-text)
+  - [Execution with Animation](#execution-with-animation)
+- [Available Colors and Styles](#available-colors-and-styles)
+- [Development](#development)
+- [Contributing](#contributing)
+- [License](#license)
+- [Changelog](#changelog)
 
-*   **Simple Color & Style:** Easily print text in various foreground colors (standard and bright) and apply styles like bold and underline.
-*   **Convenience Methods:** Dedicated methods for common colors (`red`, `green`, `blue`, etc.) and styles (`bold`, `underline`).
-*   **Structured Logging:** Implement robust logging with standard levels (DEBUG, INFO, WARNING, ERROR).
-*   **Log Level Filtering:** Control the verbosity of console and file output based on log levels.
-*   **Customizable Log Templates:** Define custom formats for log messages, including timestamps and user-defined fields.
-*   **Thread-Safe File Logging:** Reliably log messages to a file, even in multi-threaded applications.
-*   **Exception Tracing:** Automatically format and print exception tracebacks with appropriate colors.
-*   **Multicolor Output:** Print a sequence of text segments, each with its own color, on a single line.
-*   **Text Highlighting:** Find and highlight specific substrings within a larger text block.
-*   **Execution Animation:** Display a visual animation while a function executes, providing feedback for long-running tasks.
-*   **Manual Control:** Activate and deactivate specific colors or styles for fine-grained control over console output.
+## Installation
 
-## 📦 Installation
-
-Install ASCIIColors directly from the Python Package Index (PyPI):
+Install ASCIIColors via `pip` from the Python Package Index (PyPI):
 
 ```bash
 pip install ascii_colors
 ```
 
-## 🚀 Quick Start
+## Quick Start: Logging
 
-Get started quickly with basic colored output or structured logging:
+Get started with enhanced logging immediately. By default, logs go to the console with colors.
 
 ```python
 from ascii_colors import ASCIIColors, LogLevel
 
-# --- Simple Colored Output ---
-
-# Using convenience methods
-ASCIIColors.red("This is an error message.")
-ASCIIColors.green("Operation successful!")
-ASCIIColors.yellow("Warning: something needs attention.")
-ASCIIColors.bold("This text is bold and bright red.", color=ASCIIColors.color_bright_red)
-ASCIIColors.underline("This is underlined blue text.", color=ASCIIColors.color_blue)
-
-# Using the base print method
-ASCIIColors.print("Custom cyan text", color=ASCIIColors.color_cyan)
-ASCIIColors.print(
-    "Bold magenta text",
-    color=ASCIIColors.color_magenta,
-    style=ASCIIColors.style_bold
-)
-
-# --- Structured Logging ---
-
-# Set the minimum level (e.g., show INFO and above)
-ASCIIColors.set_log_level(LogLevel.INFO)
-
-# Log messages using different levels
-ASCIIColors.debug("This won't be shown with INFO level.") # Hidden
-ASCIIColors.info("Application starting...")
-ASCIIColors.warning("Configuration file not found, using defaults.")
-ASCIIColors.error("Failed to connect to the database!")
-
-# Log success/failure messages (uses INFO level internally)
-ASCIIColors.success("Data processing complete.")
-ASCIIColors.fail("Task failed unexpectedly.")
-```
-
-## ⚙️ Core Printing Methods
-
-These methods provide the foundation for console output.
-
-### `ASCIIColors.print(text, color=..., style=..., end=..., flush=...)`
-
-The core method for printing text.
-
-*   `text` (str): The text to print.
-*   `color` (str): An ANSI color code (e.g., `ASCIIColors.color_red`). Defaults to `color_bright_red`.
-*   `style` (str): An ANSI style code (e.g., `ASCIIColors.style_bold`). Defaults to `""`.
-*   `end` (str): String appended after the text. Defaults to `\n`.
-*   `flush` (bool): Whether to forcibly flush the stream. Defaults to `False`.
-
-```python
-ASCIIColors.print("Hello", color=ASCIIColors.color_green, style=ASCIIColors.style_bold, end="... ")
-ASCIIColors.print("World!", color=ASCIIColors.color_blue, style=ASCIIColors.style_underline)
-# Output (colored): Hello... World!
-```
-
-### Convenience Color Methods
-
-Shortcuts for `ASCIIColors.print()` with preset colors. Examples: `red()`, `green()`, `blue()`, `yellow()`, `cyan()`, `magenta()`, `orange()`, `black()`, `white()`, and their `bright_` counterparts (e.g., `bright_red()`).
-
-```python
-ASCIIColors.bright_yellow("This is bright yellow text.")
-```
-
-### Convenience Style Methods
-
-Shortcuts for `ASCIIColors.print()` with preset styles.
-
-*   `bold(text, color=..., end=..., flush=...)`: Prints bold text. Defaults to `color_bright_red`.
-*   `underline(text, color=..., end=..., flush=...)`: Prints underlined text. Defaults to `color_bright_red`.
-
-```python
-ASCIIColors.bold("Important!", color=ASCIIColors.color_bright_white)
-ASCIIColors.underline("Read this carefully.", color=ASCIIColors.color_cyan)
-```
-
-## 🪵 Advanced Logging
-
-ASCIIColors includes a flexible logging system built on top of its printing capabilities.
-
-### Log Levels (`LogLevel`)
-
-Control message verbosity using integer-based levels:
-
-```python
-from ascii_colors import LogLevel
-
-LogLevel.DEBUG    # 0: Detailed diagnostic information
-LogLevel.INFO     # 1: General operational information
-LogLevel.WARNING  # 2: Indicates potential issues
-LogLevel.ERROR    # 3: Indicates errors that prevented normal operation
-
-# Set the minimum level of messages to display/log
-ASCIIColors.set_log_level(LogLevel.INFO) # Default
-ASCIIColors.set_log_level(LogLevel.DEBUG) # Show everything
-ASCIIColors.set_log_level(LogLevel.WARNING) # Show WARNING and ERROR only
-```
-
-### Logging Methods
-
-Methods for logging messages at specific levels. They respect the configured `_log_level`.
-
-*   `debug(text, **kwargs)`: Logs a debug message (Magenta).
-*   `info(text, **kwargs)`: Logs an info message (Blue). Can override color via `kwargs`.
-*   `warning(text, **kwargs)`: Logs a warning message (Orange).
-*   `error(text, **kwargs)`: Logs an error message (Red).
-
-*   `success(text, **kwargs)`: Convenience method, logs an INFO message in Green.
-*   `fail(text, **kwargs)`: Convenience method, logs an INFO message in Red.
-
-Any additional `**kwargs` passed are available for use in custom templates.
-
-```python
+# Set the minimum level to display (optional, default is INFO)
 ASCIIColors.set_log_level(LogLevel.DEBUG)
-ASCIIColors.debug("Detailed step 1 info.")
-ASCIIColors.info("User logged in.", user_id=123) # Pass custom data
-ASCIIColors.warning("Disk space low.")
-ASCIIColors.error("Critical component failed.")
-ASCIIColors.success("Backup completed.")
-ASCIIColors.fail("Payment processing failed.")
-```
 
-### Customizable Templates (`set_template`)
-
-Define the format for log messages per level. Templates must include `{datetime}` and `{message}` placeholders. Other keys passed via `**kwargs` to logging methods can also be used.
-
-```python
-from ascii_colors import LogLevel
-
-# Default template: "[LEVEL][{datetime}] {message}"
-
-# Set a custom template for INFO messages
-ASCIIColors.set_template(
-    LogLevel.INFO,
-    "✅ [{datetime}] ({level_name}): {message} [Context: {context}]"
-)
-
-# Set a custom template for ERROR messages
-ASCIIColors.set_template(
-    LogLevel.ERROR,
-    "🔥 ERROR [{datetime}] | {message} | Module: {module_name}"
-)
-
-
-# Use the custom templates (assuming log level allows)
-ASCIIColors.info("Task started", level_name="INFO", context="Processing")
-# Output (colored): ✅ [2023-10-27 10:30:00] (INFO): Task started [Context: Processing]
-
-ASCIIColors.error("File not found", module_name="FileHandler")
-# Output (colored): 🔥 ERROR [2023-10-27 10:30:01] | File not found | Module: FileHandler
-```
-
-### File Logging (`set_log_file`)
-
-Log messages to a specified file in addition to the console. File output is plain text (no ANSI codes) and respects the configured log level. Operations are thread-safe.
-
-```python
-# Configure logging to a file
-ASCIIColors.set_log_file("logs/my_application.log") # Creates 'logs' dir if needed
-
-# These messages will go to console (if level permits) AND the file
-ASCIIColors.info("Starting data import.")
-ASCIIColors.warning("Skipping invalid record.")
-
-# Check the contents of 'logs/my_application.log':
-# [INFO][2023-10-27 10:35:00] Starting data import.
-# [WARNING][2023-10-27 10:35:01] Skipping invalid record.
-```
-
-## 🛠️ Utility Functions
-
-Helpful functions for common console tasks.
-
-### Exception Tracing (`trace_exception`, `get_trace_exception`)
-
-Format and print exception tracebacks clearly using error colors.
-
-```python
-from ascii_colors import trace_exception, get_trace_exception
+ASCIIColors.debug("Detailed information for developers.")
+ASCIIColors.info("General progress message.")
+ASCIIColors.warning("Something requires attention.")
+ASCIIColors.error("An error occurred.", user_id=123) # Can pass extra context
 
 try:
-    result = 10 / 0
-except Exception as ex:
-    # Print the formatted traceback directly to console (using ASCIIColors.error)
-    trace_exception(ex)
-
-    # Or, get the formatted traceback as a string
-    # traceback_str = get_trace_exception(ex)
-    # print(f"Caught exception:\n{traceback_str}")
+    result = 1 / 0
+except Exception as e:
+    # Log error with traceback automatically included
+    ASCIIColors.error("Calculation failed", exc_info=e)
+    # Or use the utility function
+    # from ascii_colors import trace_exception
+    # trace_exception(e)
 ```
 
-### Multicolor Text (`multicolor`)
+## Basic Color Printing (Legacy)
 
-Print different parts of a message in different colors on the same line.
+While the focus is now on structured logging, the original simple color printing methods remain for backward compatibility and quick, direct console output. These methods now route through the INFO level logger by default.
+
+```python
+from ascii_colors import ASCIIColors
+
+# Print text in bright red (logs as INFO)
+ASCIIColors.print("Hello, world!", ASCIIColors.color_bright_red)
+
+# Use specific color methods (also log as INFO)
+ASCIIColors.red("This is red.")
+ASCIIColors.green("This is green.")
+ASCIIColors.blue("This is blue.")
+ASCIIColors.yellow("This is yellow.")
+ASCIIColors.magenta("This is magenta.")
+ASCIIColors.cyan("This is cyan.")
+
+# Style methods (log as INFO)
+ASCIIColors.bold("This is bold white text.", color=ASCIIColors.color_white)
+ASCIIColors.underline("This is underlined.", color=ASCIIColors.color_yellow)
+
+# Semantic methods (log at appropriate levels)
+ASCIIColors.success("Operation succeeded!") # Logs as INFO, green
+ASCIIColors.fail("Operation failed!")     # Logs as ERROR, red
+```
+**Note:** Color/style arguments in these methods primarily affect the default `ConsoleHandler`. Other handlers (like `FileHandler`) will typically receive the formatted message without color codes.
+
+## Core Logging Concepts
+
+ASCIIColors adopts a flexible logging system based on Handlers and Formatters, similar to Python's standard `logging` module.
+
+### Log Levels
+
+Control the verbosity of your logs. Messages below the set global level are ignored.
+
+```python
+from ascii_colors import LogLevel, ASCIIColors
+
+ASCIIColors.set_log_level(LogLevel.INFO) # Default level
+
+# Available Levels (from lowest to highest):
+# LogLevel.DEBUG    (Value: 0) - Detailed diagnostic information
+# LogLevel.INFO     (Value: 1) - General operational messages
+# LogLevel.WARNING  (Value: 2) - Indications of potential issues
+# LogLevel.ERROR    (Value: 3) - Errors that prevented normal operation
+```
+
+### Handlers
+
+Handlers determine where log messages are sent. You can add multiple handlers.
+
+```python
+from ascii_colors import ConsoleHandler, FileHandler, RotatingFileHandler
+
+# Default handler is ConsoleHandler(stream=sys.stdout)
+
+# Add a handler to log INFO and above to a file
+file_handler = FileHandler("app.log", level=LogLevel.INFO)
+ASCIIColors.add_handler(file_handler)
+
+# Add a handler for rotating log files (e.g., 5MB limit, 3 backups)
+rotating_handler = RotatingFileHandler(
+    "app_rotate.log",
+    maxBytes=5*1024*1024, # 5 MB
+    backupCount=3
+)
+ASCIIColors.add_handler(rotating_handler)
+
+# Add a handler to send errors specifically to stderr (console)
+error_console_handler = ConsoleHandler(level=LogLevel.ERROR, stream=sys.stderr)
+ASCIIColors.add_handler(error_console_handler)
+
+# --- Managing Handlers ---
+# ASCIIColors.remove_handler(file_handler) # Remove a specific handler
+# ASCIIColors.clear_handlers()           # Remove all handlers
+```
+
+### Formatters
+
+Formatters control the layout of log messages within each handler.
+
+```python
+from ascii_colors import Formatter, JSONFormatter
+
+# Create a custom format string
+# Available placeholders: {level_name}, {datetime}, {message}
+# Optional (if include_source=True): {file_name}, {line_no}, {func_name}
+# Plus any keys from context or **kwargs passed to log methods.
+custom_format = "[{datetime:%Y-%m-%d %H:%M:%S.%f}] {level_name} ({func_name}): {message}"
+my_formatter = Formatter(fmt=custom_format, include_source=True)
+
+# Apply the formatter to a specific handler
+file_handler.set_formatter(my_formatter)
+
+# Use a JSON formatter for structured logging
+json_formatter = JSONFormatter(include_fields=["datetime", "level_name", "message", "user_id"])
+json_file_handler = FileHandler("app_structured.jsonl", formatter=json_formatter)
+ASCIIColors.add_handler(json_file_handler)
+```
+
+### Context Management
+
+Add contextual information (like user ID, request ID) to logs automatically within a specific thread or scope.
+
+```python
+# Set context for the current thread
+ASCIIColors.set_context(request_id="req-123", user_id="alice")
+ASCIIColors.info("Processing user request.")
+# Output (depending on formatter): ... request_id='req-123' user_id='alice' ...
+
+# Use a context manager for temporary context
+with ASCIIColors.context(task="data_upload"):
+    ASCIIColors.info("Starting upload task.")
+    # Context manager automatically restores previous context on exit
+    with ASCIIColors.context(user_id="bob"): # Override user_id temporarily
+         ASCIIColors.warning("Nested context.")
+
+ASCIIColors.info("Back to original context.")
+
+# Clear specific context keys or all context for the thread
+ASCIIColors.clear_context("user_id")
+ASCIIColors.clear_context() # Clears all
+```
+Context variables are available as placeholders (e.g., `{request_id}`) in `Formatter` strings and are included in `JSONFormatter` output if not filtered out.
+
+## Advanced Usage Examples
+
+### Multiple Handlers (Console & File)
+
+Log debug messages to console and info messages to a file with different formats.
+
+```python
+from ascii_colors import ASCIIColors, LogLevel, ConsoleHandler, FileHandler, Formatter
+
+ASCIIColors.clear_handlers() # Start fresh
+ASCIIColors.set_log_level(LogLevel.DEBUG) # Global level allows debug
+
+# Console Handler for DEBUG+ with simple format
+console_formatter = Formatter("{level_name}: {message}")
+console_handler = ConsoleHandler(level=LogLevel.DEBUG, formatter=console_formatter)
+ASCIIColors.add_handler(console_handler)
+
+# File Handler for INFO+ with detailed format
+file_formatter = Formatter(
+    fmt="[{datetime}] {level_name} [{file_name}:{line_no}] - {message}",
+    include_source=True
+)
+file_handler = FileHandler("detailed.log", level=LogLevel.INFO, formatter=file_formatter)
+ASCIIColors.add_handler(file_handler)
+
+ASCIIColors.debug("This goes only to console.")
+ASCIIColors.info("This goes to console and file with different formats.")
+```
+
+### Rotating Log Files
+
+```python
+from ascii_colors import RotatingFileHandler, Formatter, LogLevel
+
+# Keep logs up to 10MB, with 5 backup files
+rotating_handler = RotatingFileHandler(
+    filename="app_rotating.log",
+    maxBytes=10 * 1024 * 1024, # 10 MB
+    backupCount=5,
+    level=LogLevel.INFO,
+    formatter=Formatter("[{datetime}] {level_name}: {message}")
+)
+ASCIIColors.add_handler(rotating_handler)
+
+# Log messages... rotation will happen automatically
+for i in range(100000):
+    ASCIIColors.info(f"Logging message number {i}")
+```
+
+### JSON Logging
+
+Output logs in JSON Lines format for easy parsing.
+
+```python
+from ascii_colors import FileHandler, JSONFormatter, LogLevel
+
+# Configure JSON output
+json_formatter = JSONFormatter(
+    include_fields=["datetime", "level_name", "message", "request_id", "user", "file_name"],
+    include_source=True # To get file_name
+)
+json_handler = FileHandler("logs.jsonl", level=LogLevel.INFO, formatter=json_formatter)
+ASCIIColors.add_handler(json_handler)
+
+# Log with extra context
+with ASCIIColors.context(request_id="req-789"):
+    ASCIIColors.info("User logged in", user="charlie")
+    ASCIIColors.warning("Disk space low", user="system", free_mb=500)
+
+# Example output line in logs.jsonl:
+# {"datetime": "2023-10-27T15:30:00.123456", "level_name": "INFO", "message": "User logged in", "request_id": "req-789", "user": "charlie", "file_name": "my_app.py"}
+```
+
+### Custom Formatting with Context
+
+Combine custom formatters and context management.
+
+```python
+from ascii_colors import Formatter, ConsoleHandler
+
+formatter = Formatter(
+    "[{datetime:%H:%M:%S}] {level_name} | Req:{request_id} | User:{user_id} | {message}"
+)
+# Set this formatter on the default console handler (or add a new one)
+# Assuming default handler is at index 0 or added explicitly:
+ASCIIColors._handlers[0].set_formatter(formatter)
+
+with ASCIIColors.context(request_id="abc", user_id="guest"):
+    ASCIIColors.info("Page loaded.")
+    with ASCIIColors.context(user_id="admin"):
+        ASCIIColors.warning("Admin action performed.")
+
+# Example Console Output:
+# [16:45:10] INFO | Req:abc | User:guest | Page loaded.
+# [16:45:10] WARNING | Req:abc | User:admin | Admin action performed.
+```
+
+## Utility Functions
+
+Beyond logging, ASCIIColors provides helpful console utilities.
+
+### Exception Tracing
+
+Easily log formatted exception tracebacks.
+
+```python
+from ascii_colors import trace_exception, ASCIIColors
+
+try:
+    # Code that might raise an exception
+    data = {}
+    print(data['missing_key'])
+except Exception as ex:
+    # Logs the error message + full traceback using ASCIIColors.error()
+    trace_exception(ex)
+    # OR log manually with exc_info
+    # ASCIIColors.error("Failed to access data", exc_info=ex)
+```
+
+### Multicolor Text
+
+Print a single line with multiple color segments (direct console print).
 
 ```python
 ASCIIColors.multicolor(
-    ["Status: ", "RUNNING", " | Progress: ", "75%"],
-    [
-        ASCIIColors.color_white,
-        ASCIIColors.color_bright_green,
-        ASCIIColors.color_white,
-        ASCIIColors.color_cyan
-    ]
+    ["Success: ", "Processed ", "100 items."],
+    [ASCIIColors.color_green, ASCIIColors.color_white, ASCIIColors.color_cyan]
 )
-# Output (colored): Status: RUNNING | Progress: 75%
+# Output: Green "Success: " White "Processed " Cyan "100 items." Reset
 ```
 
-### Text Highlighting (`highlight`)
+### Highlighting Text
 
-Emphasize occurrences of specific substrings within a text block.
+Highlight specific words or lines in output (direct console print).
 
 ```python
-text = "Log entry: User 'admin' logged in. User 'guest' attempted login."
-keywords = ["admin", "guest"]
-
-# Highlight only the keywords
 ASCIIColors.highlight(
-    text,
-    keywords,
-    color=ASCIIColors.color_white, # Base text color
-    highlight_color=ASCIIColors.color_bright_yellow # Highlight color
+    "Error found in line 123: Critical issue.",
+    ["Error", "Critical"],
+    highlight_color=ASCIIColors.color_bright_red
 )
-# Output (colored): Log entry: User 'admin' logged in. User 'guest' attempted login.
 
-# Highlight the entire lines containing keywords
-log_data = "INFO: System started\nERROR: Connection failed\nINFO: User 'admin' logged out"
 ASCIIColors.highlight(
-    log_data,
-    "ERROR",
-    color=ASCIIColors.color_green,
-    highlight_color=ASCIIColors.color_bright_red,
-    whole_line=True
+    "Line 1\nImportant Line 2\nLine 3",
+    "Important",
+    whole_line=True, # Highlights the entire line containing "Important"
+    highlight_color=ASCIIColors.color_yellow
 )
-# Output (colored):
-# INFO: System started      (green)
-# ERROR: Connection failed (bright red)
-# INFO: User 'admin' logged out (green)
-
 ```
 
-### Execution Animation (`execute_with_animation`)
+### Execution with Animation
 
-Display a spinning animation while a function runs, providing visual feedback for potentially long operations.
+Display a spinner animation while a function executes.
 
 ```python
 import time
 
-def simulate_work(duration):
-    print(f"\nStarting work for {duration} seconds...")
+def long_running_task(duration):
+    print(f"\nTask started (sleeping for {duration}s)") # Can print inside
     time.sleep(duration)
-    print("\nWork finished!")
-    return f"Completed after {duration}s"
+    return "Task finished successfully!"
 
-# Run the function with an animation
 result = ASCIIColors.execute_with_animation(
-    "Processing data...", # Text displayed next to animation
-    simulate_work,        # Function to execute
-    5,                    # Positional argument for simulate_work
-    color=ASCIIColors.color_cyan # Color for the pending text and animation
+    "Processing data...", # Text shown with spinner
+    long_running_task,    # Function to run
+    5,                    # Arguments for the function (duration=5)
+    color=ASCIIColors.color_cyan # Optional color for spinner text
 )
+ASCIIColors.success(f"Task result: {result}")
 
-# Output shows:
-# Processing data... ⠋ (spinning animation in cyan)
-# (After 5 seconds, the line updates)
-# Processing data... ✓ (green checkmark)
-#
-# Starting work for 5 seconds...
-# Work finished!
+# Handles exceptions too:
+def failing_task():
+    time.sleep(2)
+    raise RuntimeError("Something failed!")
 
-print(f"\nFunction returned: {result}")
-# Output: Function returned: Completed after 5s
+try:
+    ASCIIColors.execute_with_animation("Running failing task...", failing_task)
+except RuntimeError as e:
+    ASCIIColors.fail(f"Caught task failure: {e}")
 ```
+The animation shows a checkmark (✓) on success or a cross mark (✗) on failure.
 
-## 🕹️ Manual Color/Style Control
+## Available Colors and Styles
 
-Activate and reset colors/styles manually for more complex output scenarios.
-
-*   `activate(color_or_style)`: Prints the ANSI code to activate a color or style without adding text or a newline.
-*   `reset()`, `resetAll()`: Prints the ANSI code to reset all colors and styles.
-*   `resetColor()`: Resets only the color.
-*   `resetStyle()`: Resets only the style (effect may vary across terminals).
-*   Convenience activation methods: `activateRed()`, `activateGreen()`, `activateBold()`, `activateUnderline()`, etc.
+Use these constants with `ASCIIColors.print()`, `ASCIIColors.bold()`, etc., or directly.
 
 ```python
-ASCIIColors.activate(ASCIIColors.color_blue)
-ASCIIColors.activate(ASCIIColors.style_bold)
-print("This text is bold blue.", end="")
-ASCIIColors.reset() # Reset color and style
-print(" This text is normal.")
+# --- ANSI Color/Style Codes ---
+ASCIIColors.color_reset
 
-ASCIIColors.activateGreen()
-print("Green ", end="")
-ASCIIColors.activateYellow()
-print("Yellow ", end="")
-ASCIIColors.resetAll()
-print("Normal")
+# Regular colors
+ASCIIColors.color_black
+ASCIIColors.color_red
+ASCIIColors.color_green
+ASCIIColors.color_yellow
+ASCIIColors.color_blue
+ASCIIColors.color_magenta
+ASCIIColors.color_cyan
+ASCIIColors.color_white
+ASCIIColors.color_orange
+
+# Bright colors
+ASCIIColors.color_bright_black
+ASCIIColors.color_bright_red
+ASCIIColors.color_bright_green
+ASCIIColors.color_bright_yellow
+ASCIIColors.color_bright_blue
+ASCIIColors.color_bright_magenta
+ASCIIColors.color_bright_cyan
+ASCIIColors.color_bright_white
+ASCIIColors.color_bright_orange
+
+# Styles
+ASCIIColors.style_bold
+ASCIIColors.style_underline
 ```
 
-## 🧑‍💻 Development
+## Development
 
 To set up the development environment:
 
 ```bash
 # Clone the repository
-git clone https://github.com/ParisNeo/ascii_colors.git # Or your fork
+git clone https://github.com/ParisNeo/ascii_colors.git
 cd ascii_colors
 
-# Create and activate a virtual environment (recommended)
+# Recommended: Create and activate a virtual environment
 python -m venv venv
-source venv/bin/activate  # On Windows use `venv\Scripts\activate`
+source venv/bin/activate # or venv\Scripts\activate on Windows
 
-# Install development dependencies (includes pytest, mypy, flake8)
-# Create a requirements-dev.txt if you don't have one, e.g.:
-# flake8
-# mypy
-# pytest
-# pip install -r requirements-dev.txt # (Assuming requirements-dev.txt exists)
-pip install pytest mypy flake8 # Install directly if no file
+# Install development dependencies (if any, e.g., pytest)
+# pip install -r requirements-dev.txt # (Create this file if needed)
+pip install pytest # For running tests
 
-# Install pre-commit hooks (uses .pre-commit-config.yaml)
+# Install pre-commit hooks (optional but recommended)
 pip install pre-commit
 pre-commit install
 ```
 
 ### Running Tests
 
-Execute the test suite using `pytest`:
-
 ```bash
-python -m pytest tests/
+python -m unittest tests/test_ascii_colors.py
+# or using pytest
+pytest tests/
 ```
 
-### Type Checking
-
-Check static types using `mypy`:
+### Type Checking (using mypy)
 
 ```bash
+pip install mypy
 mypy ascii_colors/
 ```
 
-### Linting
+## Contributing
 
-Check code style using `flake8`:
+Contributions to ASCIIColors are welcome! If you have ideas for improvements, bug fixes, or new features, please feel free to open an issue or submit a pull request. Adhering to existing code style and adding tests for new functionality is appreciated.
 
-```bash
-flake8 ascii_colors/ tests/
-```
+## License
 
-(Note: The pre-commit hook `parisneo-python-check` likely runs linters and type checkers automatically.)
+ASCIIColors is licensed under the Apache License 2.0. See the [LICENSE](LICENSE) file for details.
 
-## 🙌 Contributing
+## Changelog
 
-Contributions are welcome! If you have suggestions, bug reports, or want to contribute code, please:
+### v0.7.0 (Major Refactor)
+- **Breaking Change (Conceptual):** Logging core refactored to use Handlers and Formatters.
+- **New:** Introduced `Handler` base class and `ConsoleHandler`, `FileHandler`, `RotatingFileHandler` implementations.
+- **New:** Introduced `Formatter` base class and `JSONFormatter`.
+- **New:** Added thread-local context management (`ASCIIColors.set_context`, `ASCIIColors.clear_context`, `ASCIIColors.context`). Formatters can access context variables.
+- **New:** Formatters can now optionally include source info (`{file_name}`, `{line_no}`, `{func_name}`).
+- **New:** Added `exc_info` parameter to `ASCIIColors.error()` and `trace_exception()` utility for easy traceback logging.
+- **Update:** Default behavior logs INFO+ to console with colors.
+- **Update:** Legacy print methods (`print`, `red`, `green`, etc.) now route through the logging system (default INFO level) and respect handlers/formatters. Color/style args primarily affect `ConsoleHandler`.
+- **Update:** `set_log_level()` now sets a *global* filter level. Handlers manage their own levels.
+- **Update:** Improved `execute_with_animation` to show success (✓) or failure (✗) status and handle exceptions correctly.
+- **Deprecation:** `ASCIIColors.set_template()` is deprecated; configure formatters on handlers instead.
+- **Deprecation:** `ASCIIColors.set_log_file()` is kept for backward compatibility but now *adds* a `FileHandler` instead of replacing the log target.
+- **Fix:** Enhanced thread safety around handler management and file writing.
+- **Docs:** Major README update reflecting new architecture and features.
+- **Tests:** Significantly expanded test suite covering handlers, formatters, context, rotation, JSON, and backward compatibility.
 
-1.  Check the [Issues](https://github.com/ParisNeo/console_tools/issues) page to see if your topic is already discussed.
-2.  Open a new issue to discuss your proposed changes or report a bug.
-3.  Fork the repository, create a feature branch, and make your changes.
-4.  Ensure tests pass and add new tests for your features.
-5.  Ensure code style and type checks pass (run `pre-commit run --all-files`).
-6.  Submit a pull request.
-
-## 📜 License
-
-ASCIIColors is distributed under the **Apache License 2.0**. See the [LICENSE](LICENSE) file for more details.
-
-## 📅 Changelog
-
-### v0.5.0 - v0.5.2
-*   Added `execute_with_animation` utility.
-*   Added `highlight` utility function.
-*   Refined internal logging logic in `print`.
-*   Updated setup classifiers and Python version support.
-*   Added log levels (DEBUG, INFO, WARNING, ERROR)
-*   Added customizable message templates (`set_template`)
-*   Added file logging support (`set_log_file`)
-*   Added thread-safe file writing
-*   Added comprehensive type hints
-*   Added unit tests (`pytest`)
-*   Added pre-commit configuration (`.pre-commit-config.yaml`)
-*   Added static type checking (`mypy`) config (`setup.cfg`)
-*   Added linting (`flake8`) config (`setup.cfg`)
+### v0.5.x
+- Added log levels (DEBUG, INFO, WARNING, ERROR)
+- Added basic customizable message templates (now deprecated)
+- Added basic file logging support (now superseded by FileHandler)
+- Added basic thread safety for file writing
+- Added type hints, unit tests, pre-commit config
 
 ### v0.0.1
-*   Initial release with basic color support.
-*   Basic print methods (`print`, color shortcuts like `red`, `green`, etc.).
-*   Simple styling options (`bold`, `underline`).
-*   Basic activation/reset methods.
+- Initial release with basic color support
+- Basic print methods
+- Simple styling options
+```
