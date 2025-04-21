@@ -317,6 +317,28 @@ ASCIIColors is great for:
 
 ---
 
+## Key Concepts: Logging vs. Direct Printing
+
+ASCIIColors now clearly separates its functionality:
+
+1.  **Logging Methods (`debug`, `info`, `warning`, `error`):**
+    *   These methods use the **logging system**.
+    *   Output is processed by **Handlers** (Console, File, RotatingFile, etc.).
+    *   Message format is controlled by **Formatters** (including timestamps, levels, source info, context).
+    *   Messages are filtered by **global and handler levels**.
+    *   Console output color is determined by the **log level** (via `ConsoleHandler`).
+    *   Use these for structured, configurable logging.
+
+2.  **Direct Print Methods (`red`, `green`, `blue`, `bold`, `underline`, `print`, `success`, `fail`, etc.):**
+    *   These methods print **directly to the console** (or specified stream) using `builtins.print`.
+    *   They **bypass the logging system** entirely (no handlers, formatters, levels, context involved).
+    *   Color and style are applied directly as specified in the method call.
+    *   Use these for simple, immediate, styled terminal output where logging features aren't needed.
+
+**Utilities** like `highlight`, `multicolor`, and `execute_with_animation` also use **direct printing**. The `trace_exception` utility uses the **logging system** (`ASCIIColors.error`).
+
+---
+
 ## 🤝 Contributing
 
 Contributions are welcome! Please read the [CONTRIBUTING.md](CONTRIBUTING.md) file for guidelines on setting up the development environment, coding style, running tests, and submitting pull requests.

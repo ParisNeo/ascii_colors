@@ -108,7 +108,8 @@ class Formatter:
             message: The log message.
             timestamp: The datetime of the log event.
             exc_info: Exception tuple (type, value, traceback), if any.
-            **kwargs: Additional contextual keyword arguments.
+            **kwargs: Additional contextual keyword arguments passed via logging methods
+                      or set via thread context.
 
         Returns:
             The formatted log string.
@@ -124,15 +125,19 @@ class Formatter:
             try:
                 # Walk up the stack to find the caller frame outside the library
                 frame = inspect.currentframe()
+                # Navigate up past internal logging/formatting frames
                 while (
                     frame
                     and Path(frame.f_code.co_filename).parent.name == "ascii_colors"
+                    and frame.f_code.co_name in ('_log', 'format', 'handle', 'emit', 'debug', 'info', 'warning', 'error', 'trace_exception')
                 ):
                     frame = frame.f_back
                 if frame:
                     file_name = Path(frame.f_code.co_filename).name
                     line_no = frame.f_lineno
                     func_name = frame.f_code.co_name
+                # Clean up frame reference
+                del frame
             except Exception:
                 pass  # Ignore errors during inspection
 
@@ -222,12 +227,15 @@ class JSONFormatter(Formatter):
                 while (
                     frame
                     and Path(frame.f_code.co_filename).parent.name == "ascii_colors"
+                    and frame.f_code.co_name in ('_log', 'format', 'handle', 'emit', 'debug', 'info', 'warning', 'error', 'trace_exception')
                 ):
                     frame = frame.f_back
                 if frame:
                     file_name = Path(frame.f_code.co_filename).name
                     line_no = frame.f_lineno
                     func_name = frame.f_code.co_name
+                # Clean up frame reference
+                del frame
             except Exception:
                 pass  # Ignore errors during inspection
 
@@ -279,7 +287,7 @@ class Handler(ABC):
     """
     Abstract base class for log handlers.
 
-    Handlers dispatch log records to the appropriate destination (console, file, etc.).
+    Handlers dispatch formatted log records to the appropriate destination (console, file, etc.).
     """
 
     def __init__(
@@ -312,35 +320,32 @@ class Handler(ABC):
         **kwargs: Any,
     ):
         """
-        Handles a log record.
+        Handles a log record if its level meets the handler's threshold.
 
-        Filters by level, formats the record, and emits it.
+        Filters by level, formats the record using the assigned formatter,
+        and calls the emit method.
 
         Args:
             level: The log level of the record.
             message: The log message.
             timestamp: The datetime of the log event.
             exc_info: Exception tuple, if any.
-            **kwargs: Additional context for formatting.
+            **kwargs: Additional context passed for formatting.
         """
         if level >= self.level:
             formatted_message = self.formatter.format(
                 level, message, timestamp, exc_info, **kwargs
             )
-            self.emit(
-                level, formatted_message, **kwargs
-            )  # Pass kwargs for handler-specific logic
+            self.emit(level, formatted_message) # Pass only level and formatted msg
 
     @abstractmethod
-    def emit(self, level: LogLevel, formatted_message: str, **kwargs: Any):
+    def emit(self, level: LogLevel, formatted_message: str):
         """
         Emits the formatted log record. Must be implemented by subclasses.
 
         Args:
-            level: The log level (passed for potential handler-specific logic).
-            formatted_message: The string produced by the formatter.
-            **kwargs: Original kwargs passed to the log call, useful for
-                      handler-specific behavior (e.g., console colors).
+            level: The original log level (passed for potential handler-specific logic, like coloring).
+            formatted_message: The final string produced by the formatter.
         """
         raise NotImplementedError
 
@@ -349,7 +354,7 @@ class ConsoleHandler(Handler):
     """
     Handles logging to the console (stdout/stderr).
 
-    Applies ANSI color codes based on the log level or provided arguments.
+    Applies ANSI color codes based on the log level.
     """
 
     def __init__(
@@ -369,32 +374,31 @@ class ConsoleHandler(Handler):
         super().__init__(level, formatter)
         self.stream = stream
 
-    def emit(self, level: LogLevel, formatted_message: str, **kwargs: Any):
-        """Prints the formatted message to the console with appropriate colors."""
-        # Backward compatibility: Check for raw color/style/end/flush from print/color methods
-        raw_color = kwargs.get("_raw_color")
-        raw_style = kwargs.get("_raw_style", "")
-        raw_end = kwargs.get("_raw_end", "\n")
-        raw_flush = kwargs.get("_raw_flush", False)
+    def emit(self, level: LogLevel, formatted_message: str):
+        """Prints the formatted message to the console with level-based colors."""
+        # Determine color based on the log level
+        color = ASCIIColors._level_colors.get(level, ASCIIColors.color_white)
 
-        # Determine color: Use raw color if provided, else use level color
-        color = (
-            raw_color
-            if raw_color
-            else ASCIIColors._level_colors.get(level, ASCIIColors.color_white)
-        )
+        # Construct the output string with color
+        output = f"{color}{formatted_message}{ASCIIColors.color_reset}\n" # Add newline manually
 
-        # Construct the output string
-        output = f"{raw_style}{color}{formatted_message}{ASCIIColors.color_reset}"
-
-        # Use the lock for thread-safe printing
+        # Use the lock for thread-safe writing TO THE STREAM directly
         with self._lock:
-            print(output, end=raw_end, flush=raw_flush, file=self.stream)
+            try:
+                self.stream.write(output)
+                self.stream.flush() # Ensure output is flushed
+            except Exception as e:
+                 # Fallback to stderr if writing to stream fails catastrophically
+                 print(
+                     f"{ASCIIColors.color_bright_red}PANIC: ConsoleHandler failed to write to stream: {e}{ASCIIColors.color_reset}",
+                     file=sys.stderr,
+                     flush=True
+                 )
 
 
 class FileHandler(Handler):
     """
-    Handles logging to a file.
+    Handles logging to a file. Does not add color codes.
     """
 
     def __init__(
@@ -410,7 +414,7 @@ class FileHandler(Handler):
         Args:
             filename: Path to the log file.
             level: Minimum level to handle.
-            formatter: Formatter instance. Defaults to basic Formatter (no colors).
+            formatter: Formatter instance. Defaults to basic Formatter (no source info).
             encoding: File encoding.
         """
         # Ensure formatter doesn't include source by default for file perf
@@ -421,7 +425,7 @@ class FileHandler(Handler):
         # Ensure directory exists
         self.filename.parent.mkdir(parents=True, exist_ok=True)
 
-    def emit(self, level: LogLevel, formatted_message: str, **kwargs: Any):
+    def emit(self, level: LogLevel, formatted_message: str):
         """Writes the formatted message to the log file."""
         try:
             # File operations are protected by the handler's lock
@@ -431,10 +435,12 @@ class FileHandler(Handler):
         except Exception as e:
             # Critical error: Cannot write to log file. Print directly to stderr.
             # Use direct print to avoid potential recursion if stderr uses this handler.
+            # Also use direct color codes for panic message.
             print(
                 f"{ASCIIColors.color_bright_red}PANIC: Failed to write to log file "
                 f"{self.filename}: {e}{ASCIIColors.color_reset}",
                 file=sys.stderr,
+                flush=True
             )
 
 
@@ -467,12 +473,12 @@ class RotatingFileHandler(FileHandler):
         self.maxBytes = maxBytes
         self.backupCount = backupCount
 
-    def emit(self, level: LogLevel, formatted_message: str, **kwargs: Any):
+    def emit(self, level: LogLevel, formatted_message: str):
         """Writes to the file after potentially rotating it."""
         if self.should_rotate():
             self.do_rollover()
         super().emit(
-            level, formatted_message, **kwargs
+            level, formatted_message
         )  # Call parent FileHandler's emit
 
     def should_rotate(self) -> bool:
@@ -482,7 +488,8 @@ class RotatingFileHandler(FileHandler):
         try:
             # Check file size only if it exists and we need rotation
             if self.filename.exists():
-                file_size = self.filename.stat().st_size
+                with self._lock: # Ensure consistent size check
+                    file_size = self.filename.stat().st_size
                 return file_size >= self.maxBytes
         except OSError:  # Handle potential race condition or permission error
             return False
@@ -492,7 +499,8 @@ class RotatingFileHandler(FileHandler):
         """Performs the log file rotation."""
         # Use lock to ensure rotation is atomic relative to writes
         with self._lock:
-            if not self.should_rotate():  # Double check inside lock
+            # Re-check condition inside lock to prevent race conditions
+            if not self.filename.exists() or self.filename.stat().st_size < self.maxBytes:
                 return
 
             # Standard rollover logic (similar to logging.handlers.RotatingFileHandler)
@@ -516,18 +524,21 @@ class RotatingFileHandler(FileHandler):
                             pass  # Ignore errors renaming
 
                 # Rename current log file to .1
+                # Need to check existence again as check+rename is not atomic outside lock
                 if self.filename.exists():
                     try:
                         self.filename.rename(f"{self.filename}.1")
                     except OSError:
                         pass  # Ignore errors renaming current
 
-            else:  # No backup count, just remove the current file before writing new
+            else:  # No backup count, just truncate the current file
                 if self.filename.exists():
                     try:
-                        self.filename.unlink()
+                        # Open in 'w' mode to truncate
+                        with open(self.filename, 'w', encoding=self.encoding) as f:
+                            f.truncate(0)
                     except OSError:
-                        pass  # Ignore errors deleting current
+                        pass # Ignore errors truncating
 
 
 # --- Main ASCIIColors Class ---
@@ -537,9 +548,8 @@ class ASCIIColors:
     """
     Provides methods for colored console output and enhanced logging.
 
-    Manages handlers, formatters, global log level, and thread context.
-    Offers both semantic logging methods (info, warning, etc.) and
-    direct color printing methods for backward compatibility.
+    Logging Methods (debug, info, warning, error): Use handlers/formatters.
+    Direct Print Methods (red, green, print, etc.): Print directly to console with color.
     """
 
     # --- ANSI Color/Style Codes ---
@@ -576,7 +586,7 @@ class ASCIIColors:
     # Color mapping for default ConsoleHandler level coloring
     _level_colors: Dict[LogLevel, str] = {
         LogLevel.DEBUG: color_bright_magenta,
-        LogLevel.INFO: color_bright_blue,  # Default info color
+        LogLevel.INFO: color_bright_blue,
         LogLevel.WARNING: color_bright_orange,
         LogLevel.ERROR: color_bright_red,
     }
@@ -584,15 +594,16 @@ class ASCIIColors:
     # --- Thread-Local Context ---
     _context = threading.local()
 
-    # --- Configuration Methods ---
+    # --- Logging Configuration Methods ---
 
     @classmethod
     def set_log_level(cls, level: Union[LogLevel, int]) -> None:
         """
-        Sets the *global* minimum log level.
+        Sets the *global* minimum log level for the logging system.
 
-        Messages below this level will not be processed by any handler.
-        Individual handlers may have their own higher level setting.
+        Messages below this level will not be processed by any handler via
+        the debug(), info(), warning(), error() methods.
+        Direct print methods (red(), green(), etc.) are unaffected.
 
         Args:
             level: The minimum LogLevel or its integer value.
@@ -601,14 +612,14 @@ class ASCIIColors:
 
     @classmethod
     def add_handler(cls, handler: Handler) -> None:
-        """Adds a log handler to the list of active handlers."""
+        """Adds a log handler to the list of active handlers for the logging system."""
         with cls._handler_lock:
             if handler not in cls._handlers:
                 cls._handlers.append(handler)
 
     @classmethod
     def remove_handler(cls, handler: Handler) -> None:
-        """Removes a specific handler instance."""
+        """Removes a specific handler instance from the logging system."""
         with cls._handler_lock:
             try:
                 cls._handlers.remove(handler)
@@ -617,7 +628,7 @@ class ASCIIColors:
 
     @classmethod
     def clear_handlers(cls) -> None:
-        """Removes all configured handlers."""
+        """Removes all configured handlers from the logging system."""
         with cls._handler_lock:
             cls._handlers.clear()
 
@@ -629,7 +640,7 @@ class ASCIIColors:
         formatter: Optional[Formatter] = None,
     ) -> None:
         """
-        Adds a FileHandler for the given path (Backward Compatibility).
+        [Backward Compatibility] Adds a FileHandler for the given path to the logging system.
 
         Note: This *adds* a handler. If you want this to be the *only*
         file handler, call clear_handlers() or remove existing file handlers first.
@@ -646,8 +657,8 @@ class ASCIIColors:
         """
         DEPRECATED: Use set_formatter on specific handlers instead.
 
-        This method used to set a global template per level, which is
-        incompatible with the handler/formatter architecture.
+        This method is no longer functional as formatting is handler-specific.
+        Calling it will log a warning.
 
         Args:
             level: The log level (ignored).
@@ -658,14 +669,15 @@ class ASCIIColors:
             "Configure formatters on individual handlers instead."
         )
 
-    # --- Context Management ---
+    # --- Context Management (for Logging System) ---
 
     @classmethod
     def set_context(cls, **kwargs: Any) -> None:
         """
-        Sets key-value pairs in the current thread's context.
+        Sets key-value pairs in the current thread's context for logging.
 
-        These values will be available to formatters (e.g., `{my_key}`).
+        These values will be available to formatters ({key}) when using
+        debug(), info(), warning(), error().
         """
         for key, value in kwargs.items():
             setattr(cls._context, key, value)
@@ -673,7 +685,7 @@ class ASCIIColors:
     @classmethod
     def clear_context(cls, *args: str) -> None:
         """
-        Clears keys from the current thread's context.
+        Clears keys from the current thread's logging context.
 
         If no arguments are provided, clears all context for the thread.
         Otherwise, clears only the specified keys.
@@ -699,11 +711,11 @@ class ASCIIColors:
     @contextmanager
     def context(cls, **kwargs: Any):
         """
-        Context manager to temporarily add thread-local context.
+        Context manager to temporarily add thread-local context for logging.
 
         Usage:
             with ASCIIColors.context(request_id="123"):
-                ASCIIColors.info("Processing request")
+                ASCIIColors.info("Processing request") # Log includes request_id
         """
         previous_values = {}
         added_keys = set()
@@ -721,14 +733,16 @@ class ASCIIColors:
             for key, value in kwargs.items():
                 if key in added_keys:
                     if hasattr(cls._context, key):  # Check if still exists
-                        delattr(cls._context, key)
+                        try:
+                            delattr(cls._context, key)
+                        except AttributeError: pass # Might have been deleted externally
                 elif key in previous_values:
                     setattr(cls._context, key, previous_values[key])
-                # Else: key wasn't present before and wasn't added, do nothing
+                # Else: key wasn't present before and wasn't added/restored, do nothing
 
     @classmethod
     def get_thread_context(cls) -> Dict[str, Any]:
-        """Returns a dictionary of the current thread's context."""
+        """Returns a dictionary of the current thread's logging context."""
         return {k: v for k, v in vars(cls._context).items() if not k.startswith("_")}
 
     # --- Core Logging Method ---
@@ -744,7 +758,7 @@ class ASCIIColors:
         **kwargs: Any,
     ) -> None:
         """
-        Internal method to dispatch a log record to handlers.
+        Internal method to dispatch a log record to configured handlers.
 
         Args:
             level: The log level.
@@ -753,8 +767,7 @@ class ASCIIColors:
                       If True, sys.exc_info() is used.
                       If an Exception instance, its info is used.
                       If a tuple (type, value, tb), it's used directly.
-            **kwargs: Additional data passed to formatters and handlers.
-                      Internal kwargs like _raw_color are used by ConsoleHandler.
+            **kwargs: Additional data passed to formatters via context merge.
         """
         if level < cls._global_level:
             return  # Filtered out by global level
@@ -769,9 +782,14 @@ class ASCIIColors:
             elif isinstance(exc_info, tuple) and len(exc_info) == 3:
                 final_exc_info = exc_info
             elif exc_info is True:  # Check explicitly for True
-                final_exc_info = sys.exc_info()
-                if final_exc_info[0] is None:  # No active exception
+                try:
+                    final_exc_info = sys.exc_info()
+                    # Ensure an actual exception is being handled
+                    if final_exc_info[0] is None or final_exc_info[1] is None:
+                        final_exc_info = None
+                except Exception: # If sys.exc_info() fails unexpectedly
                     final_exc_info = None
+
 
         # Iterate safely over handlers
         current_handlers: List[Handler] = []
@@ -780,40 +798,33 @@ class ASCIIColors:
 
         for handler in current_handlers:
             try:
+                # Pass kwargs which will be merged with thread context by formatter
                 handler.handle(level, message, timestamp, final_exc_info, **kwargs)
             except Exception as e:
                 # If a handler fails, report error directly to stderr
-                # Use direct print to avoid recursion
+                # Use direct print with color codes to avoid recursion
                 print(
                     f"{cls.color_bright_red}PANIC: Handler {type(handler).__name__} "
                     f"failed: {e}\n{get_trace_exception(e)}{cls.color_reset}",
                     file=sys.stderr,
+                    flush=True
                 )
 
-    # --- Semantic Logging Methods ---
+    # --- Semantic Logging Methods (Use Handlers/Formatters) ---
 
     @classmethod
     def debug(cls, message: str, **kwargs: Any) -> None:
-        """Logs a message with DEBUG level."""
+        """Logs a message with DEBUG level using the configured logging handlers."""
         cls._log(LogLevel.DEBUG, message, **kwargs)
 
     @classmethod
     def info(cls, message: str, **kwargs: Any) -> None:
-        """
-        Logs a message with INFO level.
-
-        Note: The 'color' kwarg previously used here is deprecated.
-              Use specific color methods (e.g., ASCIIColors.green) or
-              configure handler formatters if custom console color is needed.
-        """
-        if "color" in kwargs:
-            # If old 'color' kwarg is passed, map it for ConsoleHandler
-            kwargs["_raw_color"] = kwargs.pop("color")
+        """Logs a message with INFO level using the configured logging handlers."""
         cls._log(LogLevel.INFO, message, **kwargs)
 
     @classmethod
     def warning(cls, message: str, **kwargs: Any) -> None:
-        """Logs a message with WARNING level."""
+        """Logs a message with WARNING level using the configured logging handlers."""
         cls._log(LogLevel.WARNING, message, **kwargs)
 
     @classmethod
@@ -826,307 +837,165 @@ class ASCIIColors:
         **kwargs: Any,
     ) -> None:
         """
-        Logs a message with ERROR level.
+        Logs a message with ERROR level using the configured logging handlers.
 
         Args:
             message: The error message.
-            exc_info: Optional exception info to include in the log.
+            exc_info: Optional exception info to include in the log output.
                       Set to True to capture current exception, or pass
-                      an exception instance or tuple.
-            **kwargs: Additional context.
+                      an exception instance or tuple (type, value, traceback).
+            **kwargs: Additional context for formatters.
         """
         cls._log(LogLevel.ERROR, message, exc_info=exc_info, **kwargs)
 
-    # --- Backward Compatibility & Direct Color Methods ---
+    # --- Direct Console Print Methods (Bypass Logging System) ---
 
-    @classmethod
+    @staticmethod
     def print(
-        cls,
         text: str,
-        color: str = color_white,  # Default to white for general print
+        color: str = color_white, # Default to white for general print
         style: str = "",
         end: str = "\n",
         flush: bool = False,
+        file: TextIO = sys.stdout, # Allow specifying output stream
     ) -> None:
         """
-        Prints a message, routing through the INFO level logger.
-
-        Color/Style args primarily affect ConsoleHandler.
-        End/Flush args only affect ConsoleHandler.
-
-        Prefer using semantic methods (info, warning, etc.) or specific
-        color methods (red, green, etc.) for clarity.
+        Prints text directly to the console with specified color and style.
+        Bypasses the logging system (handlers/formatters/levels).
 
         Args:
             text: The text to print.
-            color: ANSI color code.
-            style: ANSI style code.
-            end: String appended after the message (console only).
-            flush: Whether to forcibly flush the stream (console only).
+            color: ANSI color code (e.g., ASCIIColors.color_red).
+            style: ANSI style code (e.g., ASCIIColors.style_bold).
+            end: String appended after the message.
+            flush: Whether to forcibly flush the stream.
+            file: The output stream (default: sys.stdout).
         """
-        cls._log(
-            LogLevel.INFO,
-            text,
-            _raw_color=color,
-            _raw_style=style,
-            _raw_end=end,
-            _raw_flush=flush,
-        )
+        print(f"{style}{color}{text}{ASCIIColors.color_reset}", end=end, flush=flush, file=file)
 
-    # Static methods for direct color printing (map to INFO level)
+    # Static methods for direct color printing (bypass logging)
     @staticmethod
-    def success(text: str, end: str = "\n", flush: bool = False) -> None:
-        """Prints text in green using INFO level."""
-        ASCIIColors._log(
-            LogLevel.INFO,
-            text,
-            _raw_color=ASCIIColors.color_green,
-            _raw_end=end,
-            _raw_flush=flush,
-        )
+    def success(text: str, end: str = "\n", flush: bool = False, file: TextIO = sys.stdout) -> None:
+        """Prints text directly to console in green."""
+        print(f"{ASCIIColors.color_green}{text}{ASCIIColors.color_reset}", end=end, flush=flush, file=file)
 
     @staticmethod
-    def fail(text: str, end: str = "\n", flush: bool = False) -> None:
-        """Prints text in red using ERROR level."""
-        ASCIIColors._log(
-            LogLevel.ERROR,
-            text,
-            _raw_color=ASCIIColors.color_red,
-            _raw_end=end,
-            _raw_flush=flush,
-        )
+    def fail(text: str, end: str = "\n", flush: bool = False, file: TextIO = sys.stdout) -> None:
+        """Prints text directly to console in red."""
+        print(f"{ASCIIColors.color_red}{text}{ASCIIColors.color_reset}", end=end, flush=flush, file=file)
 
-    # Color-specific static methods (all map to INFO level by default)
+    # Color-specific static methods for direct printing
     @staticmethod
-    def black(text: str, end: str = "\n", flush: bool = False) -> None:
-        ASCIIColors._log(
-            LogLevel.INFO,
-            text,
-            _raw_color=ASCIIColors.color_black,
-            _raw_end=end,
-            _raw_flush=flush,
-        )
+    def black(text: str, end: str = "\n", flush: bool = False, file: TextIO = sys.stdout) -> None:
+        print(f"{ASCIIColors.color_black}{text}{ASCIIColors.color_reset}", end=end, flush=flush, file=file)
 
     @staticmethod
-    def red(text: str, end: str = "\n", flush: bool = False) -> None:
-        ASCIIColors._log(
-            LogLevel.INFO,
-            text,
-            _raw_color=ASCIIColors.color_red,
-            _raw_end=end,
-            _raw_flush=flush,
-        )
+    def red(text: str, end: str = "\n", flush: bool = False, file: TextIO = sys.stdout) -> None:
+        print(f"{ASCIIColors.color_red}{text}{ASCIIColors.color_reset}", end=end, flush=flush, file=file)
 
     @staticmethod
-    def green(text: str, end: str = "\n", flush: bool = False) -> None:
-        ASCIIColors._log(
-            LogLevel.INFO,
-            text,
-            _raw_color=ASCIIColors.color_green,
-            _raw_end=end,
-            _raw_flush=flush,
-        )
+    def green(text: str, end: str = "\n", flush: bool = False, file: TextIO = sys.stdout) -> None:
+        print(f"{ASCIIColors.color_green}{text}{ASCIIColors.color_reset}", end=end, flush=flush, file=file)
 
     @staticmethod
-    def yellow(text: str, end: str = "\n", flush: bool = False) -> None:
-        ASCIIColors._log(
-            LogLevel.INFO,
-            text,
-            _raw_color=ASCIIColors.color_yellow,
-            _raw_end=end,
-            _raw_flush=flush,
-        )
+    def yellow(text: str, end: str = "\n", flush: bool = False, file: TextIO = sys.stdout) -> None:
+        print(f"{ASCIIColors.color_yellow}{text}{ASCIIColors.color_reset}", end=end, flush=flush, file=file)
 
     @staticmethod
-    def blue(text: str, end: str = "\n", flush: bool = False) -> None:
-        ASCIIColors._log(
-            LogLevel.INFO,
-            text,
-            _raw_color=ASCIIColors.color_blue,
-            _raw_end=end,
-            _raw_flush=flush,
-        )
+    def blue(text: str, end: str = "\n", flush: bool = False, file: TextIO = sys.stdout) -> None:
+        print(f"{ASCIIColors.color_blue}{text}{ASCIIColors.color_reset}", end=end, flush=flush, file=file)
 
     @staticmethod
-    def magenta(text: str, end: str = "\n", flush: bool = False) -> None:
-        ASCIIColors._log(
-            LogLevel.INFO,
-            text,
-            _raw_color=ASCIIColors.color_magenta,
-            _raw_end=end,
-            _raw_flush=flush,
-        )
+    def magenta(text: str, end: str = "\n", flush: bool = False, file: TextIO = sys.stdout) -> None:
+        print(f"{ASCIIColors.color_magenta}{text}{ASCIIColors.color_reset}", end=end, flush=flush, file=file)
 
     @staticmethod
-    def cyan(text: str, end: str = "\n", flush: bool = False) -> None:
-        ASCIIColors._log(
-            LogLevel.INFO,
-            text,
-            _raw_color=ASCIIColors.color_cyan,
-            _raw_end=end,
-            _raw_flush=flush,
-        )
+    def cyan(text: str, end: str = "\n", flush: bool = False, file: TextIO = sys.stdout) -> None:
+        print(f"{ASCIIColors.color_cyan}{text}{ASCIIColors.color_reset}", end=end, flush=flush, file=file)
 
     @staticmethod
-    def white(text: str, end: str = "\n", flush: bool = False) -> None:
-        ASCIIColors._log(
-            LogLevel.INFO,
-            text,
-            _raw_color=ASCIIColors.color_white,
-            _raw_end=end,
-            _raw_flush=flush,
-        )
+    def white(text: str, end: str = "\n", flush: bool = False, file: TextIO = sys.stdout) -> None:
+        print(f"{ASCIIColors.color_white}{text}{ASCIIColors.color_reset}", end=end, flush=flush, file=file)
 
     @staticmethod
-    def orange(text: str, end: str = "\n", flush: bool = False) -> None:
-        ASCIIColors._log(
-            LogLevel.INFO,
-            text,
-            _raw_color=ASCIIColors.color_orange,
-            _raw_end=end,
-            _raw_flush=flush,
-        )
+    def orange(text: str, end: str = "\n", flush: bool = False, file: TextIO = sys.stdout) -> None:
+        print(f"{ASCIIColors.color_orange}{text}{ASCIIColors.color_reset}", end=end, flush=flush, file=file)
 
-    # Bright color methods
+    # Bright color methods for direct printing
     @staticmethod
-    def bright_black(text: str, end: str = "\n", flush: bool = False) -> None:
-        ASCIIColors._log(
-            LogLevel.INFO,
-            text,
-            _raw_color=ASCIIColors.color_bright_black,
-            _raw_end=end,
-            _raw_flush=flush,
-        )
+    def bright_black(text: str, end: str = "\n", flush: bool = False, file: TextIO = sys.stdout) -> None:
+        print(f"{ASCIIColors.color_bright_black}{text}{ASCIIColors.color_reset}", end=end, flush=flush, file=file)
 
     @staticmethod
-    def bright_red(text: str, end: str = "\n", flush: bool = False) -> None:
-        ASCIIColors._log(
-            LogLevel.INFO,
-            text,
-            _raw_color=ASCIIColors.color_bright_red,
-            _raw_end=end,
-            _raw_flush=flush,
-        )
+    def bright_red(text: str, end: str = "\n", flush: bool = False, file: TextIO = sys.stdout) -> None:
+        print(f"{ASCIIColors.color_bright_red}{text}{ASCIIColors.color_reset}", end=end, flush=flush, file=file)
 
     @staticmethod
-    def bright_green(text: str, end: str = "\n", flush: bool = False) -> None:
-        ASCIIColors._log(
-            LogLevel.INFO,
-            text,
-            _raw_color=ASCIIColors.color_bright_green,
-            _raw_end=end,
-            _raw_flush=flush,
-        )
+    def bright_green(text: str, end: str = "\n", flush: bool = False, file: TextIO = sys.stdout) -> None:
+        print(f"{ASCIIColors.color_bright_green}{text}{ASCIIColors.color_reset}", end=end, flush=flush, file=file)
 
     @staticmethod
-    def bright_yellow(text: str, end: str = "\n", flush: bool = False) -> None:
-        ASCIIColors._log(
-            LogLevel.INFO,
-            text,
-            _raw_color=ASCIIColors.color_bright_yellow,
-            _raw_end=end,
-            _raw_flush=flush,
-        )
+    def bright_yellow(text: str, end: str = "\n", flush: bool = False, file: TextIO = sys.stdout) -> None:
+        print(f"{ASCIIColors.color_bright_yellow}{text}{ASCIIColors.color_reset}", end=end, flush=flush, file=file)
 
     @staticmethod
-    def bright_blue(text: str, end: str = "\n", flush: bool = False) -> None:
-        ASCIIColors._log(
-            LogLevel.INFO,
-            text,
-            _raw_color=ASCIIColors.color_bright_blue,
-            _raw_end=end,
-            _raw_flush=flush,
-        )
+    def bright_blue(text: str, end: str = "\n", flush: bool = False, file: TextIO = sys.stdout) -> None:
+        print(f"{ASCIIColors.color_bright_blue}{text}{ASCIIColors.color_reset}", end=end, flush=flush, file=file)
 
     @staticmethod
-    def bright_magenta(text: str, end: str = "\n", flush: bool = False) -> None:
-        ASCIIColors._log(
-            LogLevel.INFO,
-            text,
-            _raw_color=ASCIIColors.color_bright_magenta,
-            _raw_end=end,
-            _raw_flush=flush,
-        )
+    def bright_magenta(text: str, end: str = "\n", flush: bool = False, file: TextIO = sys.stdout) -> None:
+        print(f"{ASCIIColors.color_bright_magenta}{text}{ASCIIColors.color_reset}", end=end, flush=flush, file=file)
 
     @staticmethod
-    def bright_cyan(text: str, end: str = "\n", flush: bool = False) -> None:
-        ASCIIColors._log(
-            LogLevel.INFO,
-            text,
-            _raw_color=ASCIIColors.color_bright_cyan,
-            _raw_end=end,
-            _raw_flush=flush,
-        )
+    def bright_cyan(text: str, end: str = "\n", flush: bool = False, file: TextIO = sys.stdout) -> None:
+        print(f"{ASCIIColors.color_bright_cyan}{text}{ASCIIColors.color_reset}", end=end, flush=flush, file=file)
 
     @staticmethod
-    def bright_white(text: str, end: str = "\n", flush: bool = False) -> None:
-        ASCIIColors._log(
-            LogLevel.INFO,
-            text,
-            _raw_color=ASCIIColors.color_bright_white,
-            _raw_end=end,
-            _raw_flush=flush,
-        )
+    def bright_white(text: str, end: str = "\n", flush: bool = False, file: TextIO = sys.stdout) -> None:
+        print(f"{ASCIIColors.color_bright_white}{text}{ASCIIColors.color_reset}", end=end, flush=flush, file=file)
 
     @staticmethod
-    def bright_orange(text: str, end: str = "\n", flush: bool = False) -> None:
-        ASCIIColors._log(
-            LogLevel.INFO,
-            text,
-            _raw_color=ASCIIColors.color_bright_orange,
-            _raw_end=end,
-            _raw_flush=flush,
-        )
+    def bright_orange(text: str, end: str = "\n", flush: bool = False, file: TextIO = sys.stdout) -> None:
+        print(f"{ASCIIColors.color_bright_orange}{text}{ASCIIColors.color_reset}", end=end, flush=flush, file=file)
 
-    # Style methods
+    # Style methods for direct printing
     @staticmethod
     def bold(
-        text: str, color: str = color_white, end: str = "\n", flush: bool = False
+        text: str, color: str = color_white, end: str = "\n", flush: bool = False, file: TextIO = sys.stdout
     ) -> None:
-        """Prints bold text using INFO level."""
-        ASCIIColors._log(
-            LogLevel.INFO,
-            text,
-            _raw_color=color,
-            _raw_style=ASCIIColors.style_bold,
-            _raw_end=end,
-            _raw_flush=flush,
-        )
+        """Prints bold text directly to console."""
+        print(f"{ASCIIColors.style_bold}{color}{text}{ASCIIColors.color_reset}", end=end, flush=flush, file=file)
 
     @staticmethod
     def underline(
-        text: str, color: str = color_white, end: str = "\n", flush: bool = False
+        text: str, color: str = color_white, end: str = "\n", flush: bool = False, file: TextIO = sys.stdout
     ) -> None:
-        """Prints underlined text using INFO level."""
-        ASCIIColors._log(
-            LogLevel.INFO,
-            text,
-            _raw_color=color,
-            _raw_style=ASCIIColors.style_underline,
-            _raw_end=end,
-            _raw_flush=flush,
-        )
+        """Prints underlined text directly to console."""
+        print(f"{ASCIIColors.style_underline}{color}{text}{ASCIIColors.color_reset}", end=end, flush=flush, file=file)
 
     # --- Utility & Direct Console Manipulation Methods ---
-    # These methods interact directly with print and are not routed through logging handlers
+    # These methods interact directly with print and do not use the logging system.
 
     @staticmethod
     def multicolor(
-        texts: List[str], colors: List[str], end: str = "\n", flush: bool = False
+        texts: List[str], colors: List[str], end: str = "\n", flush: bool = False, file: TextIO = sys.stdout
     ) -> None:
         """Prints multiple text segments with corresponding colors directly to console."""
-        with ASCIIColors._handler_lock:  # Use lock just in case, though direct print is less safe
-            for text, color in zip(texts, colors):
-                print(f"{color}{text}", end="", flush=True)  # Flush each part
-            print(ASCIIColors.color_reset, end=end, flush=flush)  # Reset at the end
+        # No need for lock as it uses builtin print directly
+        for text, color in zip(texts, colors):
+            print(f"{color}{text}", end="", flush=True, file=file) # Flush each part
+        print(ASCIIColors.color_reset, end=end, flush=flush, file=file) # Reset at the end
 
     @staticmethod
     def highlight(
         text: str,
         subtext: Union[str, List[str]],
         color: str = color_white,
-        highlight_color: str = color_yellow,  # Changed default highlight
+        highlight_color: str = color_yellow,
         whole_line: bool = False,
+        end: str = "\n",
+        flush: bool = False,
+        file: TextIO = sys.stdout,
     ) -> None:
         """Highlights occurrences of subtext within text directly on the console."""
         if isinstance(subtext, str):
@@ -1134,38 +1003,38 @@ class ASCIIColors:
 
         output = ""
         if whole_line:
-            lines = text.split("\n")
-            for line in lines:
+            lines = text.splitlines() # Use splitlines to handle different line endings
+            for i, line in enumerate(lines):
+                is_last_line = i == len(lines) - 1
+                line_end = "" if is_last_line else "\n" # Add newline except for last line
                 if any(st in line for st in subtext):
-                    output += f"{highlight_color}{line}{ASCIIColors.color_reset}\n"
+                    output += f"{highlight_color}{line}{ASCIIColors.color_reset}{line_end}"
                 else:
-                    output += f"{color}{line}{ASCIIColors.color_reset}\n"
-            # Remove trailing newline added by loop
-            output = output.rstrip("\n")
+                    output += f"{color}{line}{ASCIIColors.color_reset}{line_end}"
         else:
             processed_text = text
             for st in subtext:
                 # Ensure reset happens correctly after highlight
-                replacement = f"{highlight_color}{st}{color}"
+                replacement = f"{highlight_color}{st}{color}" # Go back to base color
                 processed_text = processed_text.replace(st, replacement)
+            # Apply initial color and final reset
             output = f"{color}{processed_text}{ASCIIColors.color_reset}"
 
         # Print the final result directly
-        with ASCIIColors._handler_lock:  # Use lock for safety
-            print(output)
+        print(output, end=end, flush=flush, file=file)
 
     @staticmethod
-    def activate(color_or_style: str) -> None:
+    def activate(color_or_style: str, file: TextIO = sys.stdout) -> None:
         """Activates a color or style directly on the console."""
-        # Direct print - not thread safe with logging if handlers also use stdout
-        print(f"{color_or_style}", end="", flush=True)
+        print(f"{color_or_style}", end="", flush=True, file=file)
 
     @staticmethod
-    def reset() -> None:
+    def reset(file: TextIO = sys.stdout) -> None:
         """Resets all colors and styles directly on the console."""
-        print(ASCIIColors.color_reset, end="", flush=True)
+        print(ASCIIColors.color_reset, end="", flush=True, file=file)
 
     # --- Convenience activation methods ---
+    # These activate colors/styles directly on stdout by default
     @staticmethod
     def activateRed() -> None:
         ASCIIColors.activate(ASCIIColors.color_red)
@@ -1192,11 +1061,11 @@ class ASCIIColors:
 
     @staticmethod
     def resetColor() -> None:
-        ASCIIColors.reset()  # Resetting color resets all
+        ASCIIColors.reset() # Resetting color resets all
 
     @staticmethod
     def resetStyle() -> None:
-        ASCIIColors.reset()  # Resetting style resets all
+        ASCIIColors.reset() # Resetting style resets all
 
     @staticmethod
     def resetAll() -> None:
@@ -1213,7 +1082,8 @@ class ASCIIColors:
         **kwargs: Any,
     ) -> Any:
         """
-        Executes a function while displaying a pending text animation.
+        Executes a function while displaying a pending text animation (direct print).
+        Uses ASCIIColors.print internally for animation frames and status.
 
         Args:
             pending_text: Text to display during execution.
@@ -1227,78 +1097,70 @@ class ASCIIColors:
         """
         animation = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
         stop_event = threading.Event()
-        result = [None]  # Use list to pass result out of thread scope if needed
-        exception = [None]  # To capture exception from thread
-        thread_lock = Lock()  # To protect access to result/exception
+        result = [None]
+        exception = [None]
+        thread_lock = Lock()
 
-        # Default to yellow if no color is specified
         text_color = color if color else ASCIIColors.color_yellow
-        checkbox = "✓"
+        success_symbol = "✓"
+        failure_symbol = "✗"
 
         def animate():
             idx = 0
             while not stop_event.is_set():
-                # Direct print for animation control
                 animation_char = animation[idx % len(animation)]
-                # Split print for line length
-                print(
-                    f"\r{text_color}{pending_text} {animation_char}{ASCIIColors.color_reset}  ",
+                # Use ASCIIColors.print for animation frames
+                # Ensure file=sys.stdout for animation
+                ASCIIColors.print(
+                    f"\r{text_color}{pending_text} {animation_char}", # No reset here yet
+                    color="", # Color is applied manually above
+                    style="",
                     end="",
                     flush=True,
+                    file=sys.stdout # Explicitly stdout
                 )
                 idx += 1
                 time.sleep(0.1)
+            # Clear the animation character after stopping
+            ASCIIColors.print(f"\r{text_color}{pending_text}  ", color="", style="", end="", flush=True, file=sys.stdout)
+
 
         def target():
             try:
                 res = func(*args, **kwargs)
-                with thread_lock:
-                    result[0] = res
+                with thread_lock: result[0] = res
             except Exception as e_inner:
-                with thread_lock:
-                    exception[0] = e_inner
-            finally:
-                stop_event.set()
+                with thread_lock: exception[0] = e_inner
+            finally: stop_event.set()
 
         worker_thread = threading.Thread(target=target)
         animation_thread = threading.Thread(target=animate)
 
-        worker_thread.start()
-        animation_thread.start()
-
-        worker_thread.join()  # Wait for the worker to finish
-        stop_event.set()  # Ensure animation stops even if worker finished quickly
-        animation_thread.join()  # Wait for animation to print final state
+        worker_thread.start(); animation_thread.start()
+        worker_thread.join(); stop_event.set(); animation_thread.join()
 
         with thread_lock:
-            final_exception = exception[0]
-            final_result = result[0]
+            final_exception = exception[0]; final_result = result[0]
 
-        # Determine final status symbol and color
-        final_symbol = checkbox
-        final_color = ASCIIColors.color_green
+        final_symbol = success_symbol; final_color = ASCIIColors.color_green
         if final_exception:
-            final_symbol = "✗"  # Cross mark for failure
-            final_color = ASCIIColors.color_red
+            final_symbol = failure_symbol; final_color = ASCIIColors.color_red
 
-        # Clear the line and show completion status
-        # Ensure this print happens after animation thread joined
-        status_line = f"\r{text_color}{pending_text} {final_color}{final_symbol}\
-{ASCIIColors.color_reset}          "
-        print(status_line, flush=True)
-        print()  # Move to next line
+        # Use ASCIIColors.print for final status line
+        # Overwrite the pending text line
+        status_line = f"\r{text_color}{pending_text} {final_color}{final_symbol}{ASCIIColors.color_reset}          "
+        ASCIIColors.print(status_line, color="", style="", flush=True, file=sys.stdout)
+        # Move to next line using ASCIIColors.print
+        ASCIIColors.print("", color="", style="", file=sys.stdout) # Essentially prints a newline
 
-        # Re-raise exception if one occurred
-        if final_exception:
-            raise final_exception
-
+        if final_exception: raise final_exception
         return final_result
 
 
-# --- Global convenience function ---
+# --- Global convenience function (Uses Logging) ---
 def trace_exception(ex: BaseException) -> None:
     """
-    Logs the traceback of an exception using ASCIIColors.error.
+    Logs the traceback of an exception using ASCIIColors.error (logging system).
 
     Args:
         ex: The exception instance.
@@ -1306,22 +1168,22 @@ def trace_exception(ex: BaseException) -> None:
     ASCIIColors.error(f"Exception Traceback ({type(ex).__name__})", exc_info=ex)
 
 
-# --- Example Usage ---
+# --- Example Usage (Updated) ---
 if __name__ == "__main__":
-    print("--- Basic Color/Style Demo ---")
-    ASCIIColors.red("This is red text")
-    ASCIIColors.green("This is green text (success style)")
-    ASCIIColors.yellow("This is yellow text")
-    ASCIIColors.blue("This is blue text")
-    ASCIIColors.bold("This is bold white text", color=ASCIIColors.color_white)
-    ASCIIColors.underline("This is underlined cyan text", color=ASCIIColors.color_cyan)
-    ASCIIColors.print(
-        "Custom print: Orange bold",
+    print("--- Direct Color/Style Print Demo (Bypasses Logging) ---")
+    ASCIIColors.red("This is red text (direct print)")
+    ASCIIColors.green("This is green text (direct print)")
+    ASCIIColors.yellow("This is yellow text (direct print)")
+    ASCIIColors.blue("This is blue text (direct print)")
+    ASCIIColors.bold("This is bold white text (direct print)", color=ASCIIColors.color_white)
+    ASCIIColors.underline("This is underlined cyan text (direct print)", color=ASCIIColors.color_cyan)
+    ASCIIColors.print( # Uses the direct print method
+        "Custom direct print: Orange bold",
         color=ASCIIColors.color_orange,
         style=ASCIIColors.style_bold,
     )
 
-    print("\n--- Multicolor & Highlight Demo ---")
+    print("\n--- Multicolor & Highlight Demo (Direct Print) ---")
     ASCIIColors.multicolor(
         ["Formatted ", "using ", "multicolor "],
         [ASCIIColors.color_red, ASCIIColors.color_green, ASCIIColors.color_blue],
@@ -1337,74 +1199,96 @@ if __name__ == "__main__":
         whole_line=True,
     )
 
-    print("\n--- Logging Demo (Console Only - Default) ---")
-    ASCIIColors.set_log_level(LogLevel.DEBUG)  # Show all levels
-    ASCIIColors.debug("This is a debug message.")
-    ASCIIColors.info("This is an info message.")
-    ASCIIColors.warning("This is a warning message.")
-    ASCIIColors.error("This is an error message.")
+    print("\n--- Logging Demo (Uses Handlers/Formatters) ---")
+    # Reset handlers and level for demo clarity
+    ASCIIColors.clear_handlers()
+    ASCIIColors.add_handler(ConsoleHandler(level=LogLevel.DEBUG)) # Add default console handler back
+    ASCIIColors.set_log_level(LogLevel.DEBUG)  # Show all levels for logging
 
-    print("\n--- Logging with File Handler ---")
+    ASCIIColors.debug("This is a debug log message.")
+    ASCIIColors.info("This is an info log message.")
+    ASCIIColors.warning("This is a warning log message.")
+    ASCIIColors.error("This is an error log message.")
+
+    print("\n--- Logging with File Handler (No Colors in File) ---")
     log_file = Path("temp_app.log")
     if log_file.exists():
         log_file.unlink()  # Clean up previous run
-    file_handler = FileHandler(
-        log_file, level=LogLevel.INFO
-    )  # Log INFO and above to file
-    # Customize file formatter
+
+    # Setup console handler (shows DEBUG+) and file handler (shows INFO+)
+    ASCIIColors.clear_handlers()
+    ASCIIColors.add_handler(ConsoleHandler(level=LogLevel.DEBUG))
+
     file_formatter = Formatter(
-        fmt="[{datetime}] {level_name}: {message} (from {func_name})",
-        include_source=True,
+        fmt="[{datetime}] {level_name:<8} [{func_name}] {message}", # Include func_name
+        datefmt="%Y-%m-%d %H:%M:%S",
+        include_source=True
     )
-    file_handler.set_formatter(file_formatter)
+    file_handler = FileHandler(log_file, level=LogLevel.INFO, formatter=file_formatter)
     ASCIIColors.add_handler(file_handler)
-    print(f"Logging INFO, WARNING, ERROR to {log_file}")
-    ASCIIColors.debug(
-        "This debug message goes only to console."
-    )  # Below file handler level
-    ASCIIColors.info("Info message logged to console and file.")
-    ASCIIColors.warning("Warning logged to console and file.")
+    ASCIIColors.set_log_level(LogLevel.DEBUG) # Global level allows DEBUG
+
+    print(f"\nLogging DEBUG+ to console, INFO+ to '{log_file}'")
+    ASCIIColors.debug("This debug log goes only to console.")
+    ASCIIColors.info("Info log logged to console and file.")
+    ASCIIColors.warning("Warning log logged to console and file.")
     try:
         x = 1 / 0
     except ZeroDivisionError as e:
-        ASCIIColors.error("An error occurred!", exc_info=e)  # Log error with traceback
-        # Also demonstrating trace_exception utility
+        ASCIIColors.error("An error occurred!", exc_info=e, detail="Division by zero")
+        # Also demonstrating trace_exception utility (uses logging)
         trace_exception(e)
 
-    print(f"Check '{log_file}' for file output.")
+    print(f"\nCheck '{log_file}' for file output (should contain INFO, WARNING, ERROR logs).")
+    if log_file.exists():
+        print("--- Log File Content ---")
+        print(log_file.read_text())
+        print("--- End Log File Content ---")
 
-    print("\n--- Context Management Demo ---")
+
+    print("\n--- Context Management Demo (Affects Logging Only) ---")
+    # Need a formatter that uses context variables
+    context_formatter = Formatter("[{level_name}] (Session:{session_id}) {message}")
+    # Apply to the first handler (console)
+    if ASCIIColors._handlers:
+         ASCIIColors._handlers[0].set_formatter(context_formatter)
+
     ASCIIColors.set_context(session_id="XYZ")
-    ASCIIColors.info("Processing with session context.")
-    with ASCIIColors.context(user_id=123, task="upload"):
-        ASCIIColors.info("Inside user task context.")
-        ASCIIColors.set_context(sub_task="chunk_1")
-        ASCIIColors.info("Deeper context added.")
-    ASCIIColors.info("Outside user task context (session_id still present).")
-    ASCIIColors.clear_context()  # Clear all thread context
-    ASCIIColors.info("Context cleared.")
+    ASCIIColors.info("Processing with session context (logged).") # Logged
+    ASCIIColors.red("This direct red print ignores context.") # Direct print
 
-    print("\n--- Animation Demo ---")
+    with ASCIIColors.context(user_id=123, task="upload"): # user_id, task not in formatter
+        ASCIIColors.info("Inside user task context (logged).") # Logged, still shows session_id
+        ASCIIColors.set_context(sub_task="chunk_1") # sub_task not in formatter
+        ASCIIColors.info("Deeper context added (logged).") # Logged, still shows session_id
+    ASCIIColors.info("Outside user task context (logged, session_id still present).") # Logged
+    ASCIIColors.clear_context()  # Clear all thread context
+    # Change formatter back or expect format errors
+    if ASCIIColors._handlers:
+         ASCIIColors._handlers[0].set_formatter(Formatter("[{level_name}] {message}"))
+    ASCIIColors.info("Context cleared (logged).") # Logged
+
+    print("\n--- Animation Demo (Uses Direct Print) ---")
 
     def long_task(duration: float, task_name: str):
-        print(
-            f"\nStarting task '{task_name}' (will take {duration}s)..."
-        )  # Direct print inside task
+        # Use direct print inside the task if needed, or logging
+        ASCIIColors.blue(f">> Starting task '{task_name}' (will take {duration}s)...")
         time.sleep(duration)
         return f"Task '{task_name}' completed successfully."
 
     result = ASCIIColors.execute_with_animation(
         "Running long task...",
         long_task,
-        3,
+        2, # Shorter duration for testing
         "Data Processing",
         color=ASCIIColors.color_cyan,
     )
+    # Use direct print for animation result message
     ASCIIColors.success(f"Animation Result: {result}")
 
     # Example of animation with failure
     def failing_task():
-        time.sleep(2)
+        time.sleep(1)
         raise ValueError("Something went wrong in the task")
 
     try:
@@ -1412,6 +1296,7 @@ if __name__ == "__main__":
             "Running failing task...", failing_task, color=ASCIIColors.color_magenta
         )
     except ValueError as e:
+        # Use direct print for failure message
         ASCIIColors.fail(f"Caught expected exception from animation: {e}")
 
     # Clean up log file if needed
