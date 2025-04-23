@@ -1,24 +1,58 @@
-API Documentation
-=================
+API Reference
+=============
 
-This page provides auto-generated documentation from the ``ascii_colors`` source code docstrings.
+This page provides an auto-generated summary of the main `ascii_colors` API components.
 
-Main Module (`ascii_colors`)
-----------------------------
+Core Class (`ASCIIColors`)
+--------------------------
+The main class providing direct print methods and managing global state.
 
-.. automodule:: ascii_colors
-   :members:
+.. autoclass:: ascii_colors.ASCIIColors
+   :members: print, success, fail, red, green, blue, yellow, magenta, cyan, white, orange,
+             bright_red, bright_green, bright_yellow, bright_blue, bright_magenta, bright_cyan, bright_white,
+             bg_red, bg_green, bg_yellow, bg_blue, bg_magenta, bg_cyan, bg_white, bg_orange,
+             bg_bright_red, bg_bright_green, bg_bright_yellow, bg_bright_blue, bg_bright_magenta, bg_bright_cyan, bg_bright_white,
+             print_with_bg,
+             bold, dim, italic, underline, blink, reverse, hidden, strikethrough,
+             multicolor, highlight, activate, reset, resetAll,
+             execute_with_animation,
+             set_log_level, add_handler, remove_handler, clear_handlers,
+             set_context, clear_context, context, get_thread_context,
+             # Exclude internal/deprecated/less common methods if desired
+   :exclude-members: _log, set_log_file, set_template
    :undoc-members:
    :show-inheritance:
-   :exclude-members: _T, _AsciiLoggerAdapter, _style_mapping, _initial_timestamp, _logger_cache, _logger_cache_lock, _level_to_name, _name_to_level, _level_name_to_int
 
-Handler Subclasses
-------------------
+.. note::
+   Color and style constants (e.g., `color_red`, `style_bold`) are also available
+   directly on the `ASCIIColors` class but are numerous and listed in the Usage section
+   for brevity here.
 
-Handlers determine where log messages are sent.
+Logging Compatibility API
+-------------------------
+Functions mimicking the standard `logging` module.
 
-.. autoclass:: ascii_colors.ConsoleHandler
-   :members:
+.. autofunction:: ascii_colors.getLogger
+.. autofunction:: ascii_colors.basicConfig
+.. autofunction:: ascii_colors.getLevelName
+
+Level Constants
+~~~~~~~~~~~~~~~
+Standard logging level constants available directly from the module.
+
+.. data:: ascii_colors.CRITICAL
+.. data:: ascii_colors.ERROR
+.. data:: ascii_colors.WARNING
+.. data:: ascii_colors.INFO
+.. data:: ascii_colors.DEBUG
+.. data:: ascii_colors.NOTSET
+
+Handler Classes
+---------------
+Used to direct logging output.
+
+.. autoclass:: ascii_colors.Handler
+   :members: setLevel, setFormatter, handle, emit, close
    :undoc-members:
    :show-inheritance:
 
@@ -28,29 +62,28 @@ Handlers determine where log messages are sent.
    :show-inheritance:
 
 .. autoclass:: ascii_colors.FileHandler
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-.. autoclass:: ascii_colors.RotatingFileHandler
-   :members:
+   :members: emit, close, flush
    :undoc-members:
    :show-inheritance:
 
 .. autoclass:: ascii_colors.handlers.RotatingFileHandler
-   :members:
+   :members: emit, should_rotate, do_rollover
    :undoc-members:
    :show-inheritance:
+   :canonical: ascii_colors.RotatingFileHandler
 
+.. note::
+   Access `RotatingFileHandler` via `ascii_colors.handlers.RotatingFileHandler` or
+   directly as `ascii_colors.RotatingFileHandler`. The alias `ascii_colors.StreamHandler`
+   points to `ascii_colors.ConsoleHandler`.
 
-Formatter Subclasses
---------------------
-
-Formatters control the layout of log messages.
+Formatter Classes
+-----------------
 
 .. autoclass:: ascii_colors.Formatter
    :members: format, format_exception
    :undoc-members:
+   :show-inheritance:
 
 .. autoclass:: ascii_colors.JSONFormatter
    :members: format
@@ -58,12 +91,8 @@ Formatters control the layout of log messages.
    :show-inheritance:
 
 
-Main Class (`ASCIIColors`)
---------------------------
+Utility Functions
+-----------------
 
-Provides static methods for direct printing and manages global state.
-
-.. autoclass:: ascii_colors.ASCIIColors
-   :members: print, red, green, blue, yellow, magenta, cyan, white, orange, bold, underline, italic, strikethrough, bg_red, execute_with_animation, highlight, multicolor, set_context, context, add_handler, set_log_level, info, warning, error, debug, critical
-   :undoc-members:
-   :exclude-members: _handlers, _global_level, _handler_lock, _basicConfig_called, _context, _level_colors, _log, T # Exclude internal/duplicate attributes
+.. autofunction:: ascii_colors.get_trace_exception
+.. autofunction:: ascii_colors.trace_exception
