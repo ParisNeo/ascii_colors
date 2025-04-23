@@ -8,12 +8,6 @@ Welcome to ascii_colors's documentation!
 
 .. mdinclude:: ../../README.md
 
-.. note::
-   The above README is included directly. Ensure `myst-parser` is installed (`pip install myst-parser`)
-   and add `'myst_parser'` to the `extensions` list in `conf.py` if you want to render Markdown features
-   within the README directly in Sphinx. Alternatively, manually convert relevant parts to reStructuredText.
-   *For simplicity now, we will skip installing myst-parser and just include the text.*
-
 .. toctree::
    :maxdepth: 2
    :caption: Contents:
