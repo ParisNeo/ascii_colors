@@ -1,0 +1,155 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"] # Specify modern setuptools and wheel
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ascii_colors"
+version = "0.8.0"
+description = "A Python library for rich terminal output with advanced logging features."
+readme = "README.md" # Specifies the file for the long description and content type
+license = { text = "Apache-2.0" } # Use SPDX identifier for standard licenses
+requires-python = ">=3.8"
+keywords = [
+    "logging", "color", "terminal", "console", "ansi", "style",
+    "format", "json", "log rotation", "context",
+]
+authors = [
+    { name = "ParisNeo", email = "parisneo_ai@gmail.com" },
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License", # Keep this for PyPI web UI consistency
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: System :: Logging",
+    "Topic :: Terminals",
+    "Topic :: Utilities",
+]
+
+# No runtime dependencies needed for core functionality
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/ParisNeo/ascii_colors"
+Repository = "https://github.com/ParisNeo/ascii_colors"
+Issues = "https://github.com/ParisNeo/ascii_colors/issues" # Optional: Add issue tracker URL
+
+# --- Optional Dependencies ---
+[project.optional-dependencies]
+dev = [
+    # Documentation generation
+    "sphinx>=4.0",            # Core Sphinx package
+    "sphinx-rtd-theme",       # Common ReadTheDocs theme
+    "sphinx-autodoc-typehints", # Better type hint rendering in docs
+    "sphinx-autobuild",
+    "sphinx_copybutton",
+    "furo",
+    "myst-parser",
+    # Linting & Code Quality
+    "flake8",                 # Linter (already configured below)
+    "mypy",                   # Static type checker (already configured below)
+    "black",                  # Opinionated code formatter
+    "isort",                  # Import sorter
+    # Add other dev tools like pytest, coverage etc. here if needed
+]
+
+# --- Setuptools specific configuration ---
+# Use find directive to mimic find_packages(include=["ascii_colors", "ascii_colors.*"])
+# This ensures the package and its submodules are found automatically.
+[tool.setuptools.packages.find]
+where = ["."]  # Search in the root directory (where pyproject.toml is)
+include = ["ascii_colors*"] # Include the main package and any subpackages/modules starting with ascii_colors
+namespaces = false
+
+# --- Tool Configurations ---
+
+[tool.flake8]
+max-line-length = 100
+exclude = [
+    ".git",
+    "__pycache__",
+    "build",
+    "dist",
+    "venv", # Common virtual env names
+    ".venv",
+    "*.egg-info",
+    "docs/conf.py", # Often has specific formatting/imports
+ ]
+# Ignore F401 (unused import) in __init__.py as classes/enums are often imported for export
+# Ignore E501 (line too long) occasionally if needed for readability (though strive for <100)
+per-file-ignores = [
+    "ascii_colors/__init__.py: F401",
+    # "tests/test_ascii_colors.py: E501", # Example if test lines get long
+]
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+# Strict type checking options (can be demanding)
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = false # Be pragmatic with decorators if needed
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+# Exclude untyped 3rd party libraries if necessary
+# follow_imports = silent
+
+# Per-module overrides
+[[tool.mypy.overrides]]
+module = "tests.*" # Example: Relax rules for test files
+disallow_untyped_defs = false
+check_untyped_defs = false
+disallow_incomplete_defs = false
+
+[[tool.mypy.overrides]]
+# Ignore missing stubs for standard library modules if they cause issues
+module = [
+    "sys.*", "shutil.*", "inspect.*", "json.*", "traceback.*",
+    # Add other potentially problematic stdlib stubs here if needed
+]
+ignore_missing_imports = true
+
+# [[tool.mypy.overrides]]
+# # If you had third-party dependencies without type hints:
+# module = [
+#     "some_untyped_dependency.*"
+# ]
+# ignore_missing_imports = true
+
+# --- Optional: Tool Configurations for added dev tools ---
+
+[tool.black]
+line-length = 100
+target-version = ['py38', 'py39', 'py310', 'py311', 'py312'] # Align with supported Python versions
+# include = '\.pyi?$'
+# exclude = '''
+# /(
+#     \.eggs
+#   | \.git
+#   | \.hg
+#   | \.mypy_cache
+#   | \.tox
+#   | \.venv
+#   | _build
+#   | buck-out
+#   | build
+#   | dist
+# )/
+# '''
+
+[tool.isort]
+profile = "black" # Make isort compatible with black
+line_length = 100
+# skip_glob = ['*/setup.py'] # Example if you needed to skip specific files
+# known_first_party = ["ascii_colors"] # Helps isort group your own imports correctly

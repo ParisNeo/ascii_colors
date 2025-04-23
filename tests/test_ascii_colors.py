@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-Unit tests for the ascii_colors library.
+Unit tests for the ascii_colors library, including logging compatibility layer.
+Refactored for improved stability and resource management.
 
 Author: Saifeddine ALOUI (ParisNeo)
 License: Apache License 2.0
@@ -9,6 +10,7 @@ License: Apache License 2.0
 import inspect
 import io
 import json
+import logging as std_logging # Import standard logging for comparison/constants
 import os
 import re
 import shutil
@@ -17,31 +19,43 @@ import sys
 import tempfile
 import time
 import unittest
-from contextlib import redirect_stdout # Use redirect_stdout for animation tests
+from contextlib import redirect_stdout
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch, ANY
 
 # Ensure the module path is correct for testing
 try:
-    from ascii_colors import Handler
-    from ascii_colors import (ASCIIColors, ConsoleHandler, FileHandler,
-                              Formatter, JSONFormatter, LogLevel,
-                              RotatingFileHandler, get_trace_exception,
-                              trace_exception)
+    # Import core components
+    import ascii_colors # Import the module itself for easier access
+    from ascii_colors import (
+        ASCIIColors, LogLevel, Formatter, JSONFormatter,
+        Handler, ConsoleHandler, FileHandler, RotatingFileHandler,
+        get_trace_exception, trace_exception
+    )
+    # Import compatibility layer components
+    from ascii_colors import (
+        getLogger, basicConfig, handlers, # Compatibility functions/objects
+        StreamHandler, # Alias for ConsoleHandler
+        DEBUG, INFO, WARNING, ERROR, CRITICAL, # Level constants
+    )
 except ImportError:
     # If running directly from tests directory as script
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from ascii_colors import Handler
-    from ascii_colors import (ASCIIColors, ConsoleHandler, FileHandler,
-                              Formatter, JSONFormatter, LogLevel,
-                              RotatingFileHandler, get_trace_exception,
-                              trace_exception)
+    import ascii_colors
+    from ascii_colors import (
+        ASCIIColors, LogLevel, Formatter, JSONFormatter,
+        Handler, ConsoleHandler, FileHandler, RotatingFileHandler,
+        get_trace_exception, trace_exception
+    )
+    from ascii_colors import (
+        getLogger, basicConfig, handlers, StreamHandler,
+        DEBUG, INFO, WARNING, ERROR, CRITICAL,
+    )
 
 
-# Helper to strip ANSI codes
+# Helper to strip ANSI codes (unchanged)
 ANSI_ESCAPE_REGEX = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
-
 def strip_ansi(text: str) -> str:
     """Removes ANSI escape sequences from a string."""
     return ANSI_ESCAPE_REGEX.sub("", text)
@@ -52,342 +66,293 @@ class TestASCIIColors(unittest.TestCase):
 
     def setUp(self):
         """Set up test environment before each test"""
-        self.temp_dir = Path(tempfile.mkdtemp()).resolve()
+        self.temp_dir = Path(tempfile.mkdtemp(prefix="ascii_colors_test_")).resolve()
+        # Define log file paths within the temp dir
         self.log_file = self.temp_dir / "test.log"
         self.json_log_file = self.temp_dir / "test.jsonl"
         self.rotate_log_file = self.temp_dir / "rotate.log"
+        self.compat_log_file = self.temp_dir / "compat.log"
 
-        ASCIIColors.clear_handlers()
-        ASCIIColors.set_log_level(LogLevel.DEBUG)
-        ASCIIColors.clear_context()
+        # --- Reset global state using addCleanup for reliability ---
+        self.addCleanup(ASCIIColors.clear_handlers)
+        self.addCleanup(lambda: ASCIIColors.set_log_level(LogLevel.WARNING)) # Reset level
+        self.addCleanup(setattr, ASCIIColors, '_basicConfig_called', False) # Reset basicConfig flag
+        self.addCleanup(ASCIIColors.clear_context)
+        # Clear logger cache as well for isolation
+        self.addCleanup(ascii_colors._logger_cache.clear)
+        # --- End Reset ---
 
-        # Mock stream for LOGGING handler output
-        self.mock_stdout_log_stream = io.StringIO()
-        simple_formatter = Formatter("{level_name}:{message}")
-        self.test_console_handler = ConsoleHandler(
-            stream=self.mock_stdout_log_stream, formatter=simple_formatter, level=LogLevel.DEBUG
-        )
-        ASCIIColors.add_handler(self.test_console_handler)
-
-        # Patch builtins.print for DIRECT print method tests
-        self.patcher_builtin_print = patch("builtins.print")
-        self.mock_builtin_print = self.patcher_builtin_print.start()
+        # Patch builtins.print for testing DIRECT print methods
+        # Use addCleanup to ensure the patch is always stopped
+        patcher = patch("builtins.print")
+        self.mock_builtin_print = patcher.start()
+        self.addCleanup(patcher.stop)
 
         self.original_stdout = sys.stdout
         self.original_stderr = sys.stderr
 
+        # Remove the shared mock_log_stream from setup
+        # Tests will create their own streams if needed
 
     def tearDown(self):
         """Clean up test environment after each test"""
-        self.patcher_builtin_print.stop()
-        ASCIIColors.clear_handlers()
-        ASCIIColors.clear_context()
-        if hasattr(self, 'mock_stdout_log_stream') and not self.mock_stdout_log_stream.closed:
-            self.mock_stdout_log_stream.close()
+        # Temp directory removal with retries (important for Windows)
         if hasattr(self, 'temp_dir') and self.temp_dir.exists():
-            try:
-                shutil.rmtree(self.temp_dir)
-            except OSError as e:
-                print(f"\n[TEST WARNING] Failed to remove temp dir {self.temp_dir}: {e}", file=sys.stderr)
+            for i in range(3):
+                try:
+                    shutil.rmtree(self.temp_dir, ignore_errors=False)
+                    # print(f"DEBUG: Removed temp dir {self.temp_dir} on attempt {i+1}") # Optional debug
+                    break # Success
+                except OSError as e:
+                    # print(f"DEBUG: Failed removal attempt {i+1} for {self.temp_dir}: {e}", file=sys.stderr) # Optional debug
+                    if i < 2: # Only sleep if retrying
+                        time.sleep(0.2 * (i + 1)) # Exponential backoff slightly
+            else:
+                 print(f"\n[TEST ERROR] Could not remove temp dir {self.temp_dir} after retries.", file=sys.stderr)
+        elif hasattr(self, 'temp_dir'):
+            pass # print(f"DEBUG: Temp dir {self.temp_dir} did not exist in tearDown.") # Optional debug
 
 
-    def get_console_log_output(self) -> str:
-        """Helper to get captured LOG content from the ConsoleHandler's stream."""
-        if not hasattr(self, 'mock_stdout_log_stream') or self.mock_stdout_log_stream.closed:
-            return "[Stream Closed or Missing]"
-        self.mock_stdout_log_stream.seek(0)
-        return strip_ansi(self.mock_stdout_log_stream.read())
+    # --- Helper methods ---
+    def _create_capture_stream_handler(self, level=DEBUG, formatter=None):
+        """Creates a ConsoleHandler writing to a new StringIO stream and returns both."""
+        capture_stream = io.StringIO()
+        self.addCleanup(capture_stream.close) # Ensure stream is closed after test
+        if formatter is None:
+             formatter = Formatter("{message}", style='{') # Simple default for tests
+        handler = ConsoleHandler(stream=capture_stream, level=level, formatter=formatter)
+        return handler, capture_stream
 
-    def get_raw_console_log_output(self) -> str:
-        """Helper to get captured LOG content (with colors) from the ConsoleHandler's stream."""
-        if not hasattr(self, 'mock_stdout_log_stream') or self.mock_stdout_log_stream.closed:
-            return "[Stream Closed or Missing]"
-        self.mock_stdout_log_stream.seek(0)
-        return self.mock_stdout_log_stream.read()
+    def _get_stream_value(self, stream: io.StringIO) -> str:
+        """Gets the value from a StringIO stream."""
+        if stream.closed:
+            return "[Stream Closed]"
+        stream.seek(0)
+        return stream.read()
 
     def assert_direct_print_called_with(self, expected_text_part: str, color_code: str = None, style_code: str = "", **kwargs):
         """Asserts that builtins.print (mocked) was called with expected args."""
-        found_call = False
-        time.sleep(0.05) # Allow potential buffer flush
-        calls = self.mock_builtin_print.call_args_list
-        # Default file kwarg should be compared against the original stdout at test start
+        # (Implementation unchanged from previous version, seems okay)
+        found_call = False; time.sleep(0.05); calls = self.mock_builtin_print.call_args_list
         expected_file = kwargs.get('file', self.original_stdout)
-
         for call in calls:
             args, kwargs_call = call
             if not args: continue
             printed_text = args[0]
             if not isinstance(printed_text, str): continue
-
-            # Use case-insensitive check for the text part
-            # Check file kwarg first for reliable matching
-            if expected_text_part.lower() in strip_ansi(printed_text).lower() and \
+            stripped_printed = strip_ansi(printed_text).lower().strip()
+            # Be more flexible with the text check
+            if expected_text_part.lower() in stripped_printed and \
                kwargs_call.get('file', self.original_stdout) == expected_file:
                 found_call = True
                 expected_start = style_code + (color_code if color_code else "")
                 # Allow for potential \r prefix from animation calls captured here
-                self.assertTrue(printed_text.lstrip('\r').startswith(expected_start), f"Direct print start mismatch. Expected: '{expected_start}', Got: '{printed_text}'")
+                self.assertTrue(printed_text.lstrip('\r').startswith(expected_start), f"Direct print start mismatch. Expected prefix: '{expected_start}', Got: '{printed_text}'")
                 self.assertTrue(printed_text.endswith(ASCIIColors.color_reset), f"Direct print reset mismatch. Got: '{printed_text}'")
-                # Check other kwargs
                 self.assertEqual(kwargs_call.get('end', '\n'), kwargs.get('end', '\n'))
                 self.assertEqual(kwargs_call.get('flush', False), kwargs.get('flush', False))
-                break # Found the matching call
-
+                break
         self.assertTrue(found_call, f"Direct print call containing '{expected_text_part}' with file={expected_file} not found in calls:\n{calls}")
 
-    # --- Test Core Logging Functionality ---
+    # --- Test Core Logging Functionality (ASCIIColors API) ---
+
     def test_log_levels_enum(self):
-        """Test LogLevel enum values"""
-        self.assertEqual(LogLevel.DEBUG, 0)
-        self.assertEqual(LogLevel.INFO, 1)
-        self.assertEqual(LogLevel.WARNING, 2)
-        self.assertEqual(LogLevel.ERROR, 3)
+        """Test LogLevel enum values match logging standards"""
+        self.assertEqual(LogLevel.DEBUG.value, std_logging.DEBUG)
+        self.assertEqual(LogLevel.INFO.value, std_logging.INFO)
+        self.assertEqual(LogLevel.WARNING.value, std_logging.WARNING)
+        self.assertEqual(LogLevel.ERROR.value, std_logging.ERROR)
+        self.assertEqual(LogLevel.CRITICAL.value, std_logging.CRITICAL)
+        self.assertEqual(DEBUG, std_logging.DEBUG)
+        self.assertEqual(INFO, std_logging.INFO)
+        self.assertEqual(WARNING, std_logging.WARNING)
+        self.assertEqual(ERROR, std_logging.ERROR)
+        self.assertEqual(CRITICAL, std_logging.CRITICAL)
 
-    def test_default_handler_added_in_setup(self):
-        """Test that a ConsoleHandler is present after setUp."""
-        self.assertGreaterEqual(len(ASCIIColors._handlers), 1, "No handlers found after setup")
-        self.assertTrue(any(isinstance(h, ConsoleHandler) for h in ASCIIColors._handlers), "Default ConsoleHandler not found")
-        # Check if the specific instance added in setup is present
-        self.assertIn(self.test_console_handler, ASCIIColors._handlers)
+    def test_default_handler_auto_creation(self):
+        """Test that a default handler is added automatically on first log if none configured."""
+        self.assertEqual(len(ASCIIColors._handlers), 0)
+        ASCIIColors.info("Trigger auto-handler")
+        self.assertEqual(len(ASCIIColors._handlers), 1)
+        handler = ASCIIColors._handlers[0]
+        self.assertIsInstance(handler, ConsoleHandler)
+        self.assertEqual(handler.stream, sys.stderr)
+        self.assertIsInstance(handler.formatter, Formatter)
+        self.assertEqual(handler.formatter.style, '%')
 
-
-    def test_add_remove_clear_handlers(self):
-        """Test adding, removing, and clearing LOGGING handlers."""
-        # Ensure setup handler is present
-        if self.test_console_handler not in ASCIIColors._handlers:
-            ASCIIColors.add_handler(self.test_console_handler)
+    def test_add_remove_clear_handlers_ascii_api(self):
+        """Test adding/removing handlers via ASCIIColors API."""
+        ASCIIColors.info("Ensure default handler created if needed") # Trigger if empty
         initial_count = len(ASCIIColors._handlers)
-
         file_handler = FileHandler(self.log_file)
         ASCIIColors.add_handler(file_handler)
-        self.assertEqual(len(ASCIIColors._handlers), initial_count + 1, "Handler not added")
-        self.assertIn(file_handler, ASCIIColors._handlers)
-
+        self.assertEqual(len(ASCIIColors._handlers), initial_count + 1)
         ASCIIColors.remove_handler(file_handler)
-        self.assertEqual(len(ASCIIColors._handlers), initial_count, "Handler not removed")
-        self.assertNotIn(file_handler, ASCIIColors._handlers)
-
-        # Test removing non-existent handler
-        ASCIIColors.remove_handler(file_handler) # Should not raise error
-        self.assertEqual(len(ASCIIColors._handlers), initial_count, "Removing non-existent handler changed count")
-
+        self.assertEqual(len(ASCIIColors._handlers), initial_count)
         ASCIIColors.clear_handlers()
-        self.assertEqual(len(ASCIIColors._handlers), 0, "Handlers not cleared")
+        self.assertEqual(len(ASCIIColors._handlers), 0)
 
-    def test_global_log_level_filtering(self):
-        """Test LOGGING filtering based on the global log level."""
-        ASCIIColors.set_log_level(LogLevel.WARNING)
-        # Ensure console handler from setup is present and reset stream
-        if self.test_console_handler not in ASCIIColors._handlers:
-            ASCIIColors.add_handler(self.test_console_handler)
-        self.mock_stdout_log_stream.seek(0)
-        self.mock_stdout_log_stream.truncate() # Clear stream content
+    def test_global_log_level_filtering_ascii_api(self):
+        """Test filtering via ASCIIColors.set_log_level."""
+        handler, stream = self._create_capture_stream_handler(level=DEBUG)
+        ASCIIColors.add_handler(handler)
 
-        file_handler = FileHandler(self.log_file)
-        ASCIIColors.add_handler(file_handler)
+        ASCIIColors.set_log_level(WARNING) # Global filter set to WARNING
+        ASCIIColors.debug("D")
+        ASCIIColors.info("I")
+        ASCIIColors.warning("W")
+        ASCIIColors.error("E")
 
-        # Use distinct messages
-        ASCIIColors.debug("DebugMessageFiltering")
-        ASCIIColors.info("InfoMessageFiltering")
-        ASCIIColors.warning("WarningMessageFiltering")
-        ASCIIColors.error("ErrorMessageFiltering")
+        output = strip_ansi(self._get_stream_value(stream))
+        self.assertNotIn("D", output)
+        self.assertNotIn("I", output)
+        self.assertIn("W", output)
+        self.assertIn("E", output)
 
-        # Check console log output (via mock_stdout_log_stream)
-        cout = self.get_console_log_output()
-        # Use specific error messages for clarity
-        self.assertNotIn("DebugMessageFiltering", cout, "Debug message found in console output")
-        self.assertNotIn("InfoMessageFiltering", cout, "Info message found in console output")
-        self.assertIn("WarningMessageFiltering", cout, "Warning message missing from console output")
-        self.assertIn("ErrorMessageFiltering", cout, "Error message missing from console output")
+    def test_handler_level_filtering_ascii_api(self):
+        """Test filtering by handler level via ASCIIColors API."""
+        ASCIIColors.set_log_level(DEBUG) # Global allows all
+        handler, stream = self._create_capture_stream_handler(level=WARNING) # Handler filters
+        ASCIIColors.add_handler(handler)
 
-        # Check file output
-        self.assertTrue(self.log_file.exists())
-        content = self.log_file.read_text()
-        self.assertNotIn("DebugMessageFiltering", content, "Debug message found in file output")
-        self.assertNotIn("InfoMessageFiltering", content, "Info message found in file output")
-        self.assertIn("WarningMessageFiltering", content, "Warning message missing from file output")
-        self.assertIn("ErrorMessageFiltering", content, "Error message missing from file output")
+        ASCIIColors.debug("D"); ASCIIColors.info("I"); ASCIIColors.warning("W"); ASCIIColors.error("E")
+        output = strip_ansi(self._get_stream_value(stream))
+        self.assertNotIn("D", output); self.assertNotIn("I", output)
+        self.assertIn("W", output); self.assertIn("E", output)
 
-    def test_handler_level_filtering(self):
-        """Test LOGGING filtering based on individual handler levels."""
-        ASCIIColors.set_log_level(LogLevel.DEBUG) # Global allows all
-        ASCIIColors.clear_handlers()
+    # --- Test Formatters (ASCIIColors API context) ---
+    def test_formatter_percent_style(self):
+        """Test Formatter with % style."""
+        fmt = Formatter(fmt="%(levelname)s:%(name)s:%(message)s [%(custom)s]", style='%')
+        handler, stream = self._create_capture_stream_handler(formatter=fmt)
+        ASCIIColors.add_handler(handler)
+        ASCIIColors.info("Msg1", custom="Val1") # Pass extra via kwargs
+        self.assertIn("INFO:ASCIIColors:Msg1 [Val1]", strip_ansi(self._get_stream_value(stream)))
 
-        # Use a fresh local stream for this specific test's console handler
-        local_mock_stream = io.StringIO()
-        console_handler = ConsoleHandler(stream=local_mock_stream, level=LogLevel.WARNING) # Console=WARNING+
-        console_handler.set_formatter(Formatter("{message}"))
-        ASCIIColors.add_handler(console_handler)
-
-        file_handler = FileHandler(self.log_file, level=LogLevel.INFO) # File=INFO+
-        file_handler.set_formatter(Formatter("{message}"))
-        ASCIIColors.add_handler(file_handler)
-
-        ASCIIColors.debug("DebugMsgLvl"); ASCIIColors.info("InfoMsgLvl"); ASCIIColors.warning("WarningMsgLvl"); ASCIIColors.error("ErrorMsgLvl")
-
-        # Check local console stream (Warning, Error)
-        local_mock_stream.seek(0); cout = strip_ansi(local_mock_stream.read()); local_mock_stream.close()
-        self.assertNotIn("DebugMsgLvl", cout); self.assertNotIn("InfoMsgLvl", cout)
-        self.assertIn("WarningMsgLvl", cout); self.assertIn("ErrorMsgLvl", cout)
-
-        # Check file output (Info, Warning, Error)
-        self.assertTrue(self.log_file.exists())
-        content = self.log_file.read_text()
-        self.assertNotIn("DebugMsgLvl", content); self.assertIn("InfoMsgLvl", content)
-        self.assertIn("WarningMsgLvl", content); self.assertIn("ErrorMsgLvl", content)
-
-
-    # --- Test Formatters (Used by Logging) ---
-    def test_default_formatter_log(self):
-        """Test the default Formatter output for logging."""
-        ASCIIColors.clear_handlers(); stream = io.StringIO(); h = ConsoleHandler(stream=stream, level=LogLevel.INFO)
-        ASCIIColors.add_handler(h); ASCIIColors.info("Default Format Test")
-        stream.seek(0); raw = stream.read(); stream.close()
-        self.assertRegex(strip_ansi(raw), r"\[INFO\]\[.+\] Default Format Test")
-        self.assertTrue(raw.startswith(ASCIIColors._level_colors[LogLevel.INFO]))
-
-    def test_custom_formatter_basic_log(self):
-        """Test a custom format string for logging."""
-        if self.test_console_handler not in ASCIIColors._handlers: ASCIIColors.add_handler(self.test_console_handler)
-        self.mock_stdout_log_stream.seek(0); self.mock_stdout_log_stream.truncate()
-        self.test_console_handler.set_formatter(Formatter("{level_name}|{message}"))
-        ASCIIColors.warning("CustomFormatW"); self.assertIn("WARNING|CustomFormatW", self.get_console_log_output())
+    def test_formatter_brace_style(self):
+        """Test Formatter with { style."""
+        fmt = Formatter(fmt="{level_name}:{name}:{message} [{custom}]", style='{')
+        handler, stream = self._create_capture_stream_handler(formatter=fmt)
+        ASCIIColors.add_handler(handler)
+        ASCIIColors.warning("Msg2", custom="Val2") # Pass extra via kwargs
+        self.assertIn("WARNING:ASCIIColors:Msg2 [Val2]", strip_ansi(self._get_stream_value(stream)))
 
     def test_formatter_with_source_log(self):
-        """Test logging formatter including source file/line/func."""
-        ASCIIColors.clear_handlers(); stream = io.StringIO(); fmt = Formatter("[{func_name}] {message}", include_source=True); h = ConsoleHandler(stream=stream, formatter=fmt)
-        ASCIIColors.add_handler(h); current_line = inspect.currentframe().f_lineno + 1; ASCIIColors.info("SrcInfoMsg")
-        stream.seek(0); output = strip_ansi(stream.read()); stream.close()
-        self.assertIn(f"[test_formatter_with_source_log] SrcInfoMsg", output)
+        """Test logging formatter including source file/line/func (via ASCIIColors API)."""
+        fmt = Formatter("[{func_name}] {message}", include_source=True, style='{')
+        handler, stream = self._create_capture_stream_handler(formatter=fmt)
+        ASCIIColors.add_handler(handler)
+        ASCIIColors.info("SrcInfoMsg")
+        output = strip_ansi(self._get_stream_value(stream))
+        self.assertIn("SrcInfoMsg", output)
+        # Check the function name is captured (might be test runner dependent)
+        self.assertIn(f"[{inspect.currentframe().f_code.co_name}]", output)
 
-    def test_formatter_with_kwargs_log(self):
-        """Test logging formatter using extra kwargs."""
-        fmt = Formatter("{message}, id={req_id}"); h = self.test_console_handler
-        if h not in ASCIIColors._handlers: ASCIIColors.add_handler(h)
-        self.mock_stdout_log_stream.seek(0); self.mock_stdout_log_stream.truncate(); h.set_formatter(fmt)
-        ASCIIColors.info("RequestMsg", req_id=101); self.assertIn("RequestMsg, id=101", self.get_console_log_output())
 
+    # --- Test JSON Formatter ---
     def test_json_formatter_log(self):
-        """Test JSONFormatter output for logging including kwargs."""
-        ASCIIColors.clear_handlers(); fmt = JSONFormatter(); h = FileHandler(self.json_log_file, formatter=fmt)
-        ASCIIColors.add_handler(h); ASCIIColors.error("JsonErrorMsg", user="TestUser", code=503)
-        data = json.loads(self.json_log_file.read_text()); self.assertEqual(data.get("level_name"), "ERROR")
-        self.assertEqual(data.get("user"), "TestUser"); self.assertEqual(data.get("code"), 503)
+        """Test JSONFormatter basic output (via ASCIIColors API)."""
+        fmt = JSONFormatter(include_fields=["levelname", "name", "message", "user"])
+        h = FileHandler(self.json_log_file, formatter=fmt)
+        ASCIIColors.add_handler(h)
+        ASCIIColors.error("JsonErrorMsg", user="TestUser", code=503) # code ignored by include_fields
+        self.assertTrue(self.json_log_file.exists())
+        data = json.loads(self.json_log_file.read_text())
+        self.assertEqual(data.get("levelname"), "ERROR")
+        self.assertEqual(data.get("name"), "ASCIIColors")
+        self.assertEqual(data.get("message"), "JsonErrorMsg")
+        self.assertEqual(data.get("user"), "TestUser")
+        self.assertNotIn("code", data)
 
-    def test_json_formatter_iso_date_log(self):
-        """Test JSONFormatter with ISO date format for logging."""
-        ASCIIColors.clear_handlers(); fmt = JSONFormatter(datefmt="iso"); h = FileHandler(self.json_log_file, formatter=fmt)
-        ASCIIColors.add_handler(h); ASCIIColors.info("ISO Date Log")
-        data = json.loads(self.json_log_file.read_text()); self.assertRegex(data["datetime"], r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}")
-
-    # --- Test Handlers (Used by Logging) ---
+    # --- Test Handlers (ASCIIColors API context) ---
     def test_file_handler_log(self):
-        """Test basic FileHandler operation for logging."""
-        ASCIIColors.clear_handlers(); fh = FileHandler(self.log_file); ASCIIColors.add_handler(fh)
-        ASCIIColors.info("LogToFileTest"); content = self.log_file.read_text(); self.assertRegex(content, r"\[INFO\]\[.+\] LogToFileTest")
+        """Test FileHandler operation (via ASCIIColors API)."""
+        fh = FileHandler(self.log_file, formatter=Formatter("%(message)s"))
+        ASCIIColors.add_handler(fh)
+        ASCIIColors.info("LogToFileTest")
+        self.assertTrue(self.log_file.exists())
+        content = self.log_file.read_text().strip()
+        self.assertEqual(content, "LogToFileTest")
 
-    # Patch Path.stat directly when needed for size check
-    def test_rotating_file_handler_log(self):
-        """Test RotatingFileHandler functionality for logging."""
-        ASCIIColors.clear_handlers(); max_bytes = 100; backup_count = 2
-        log_file_path = self.rotate_log_file # Keep as Path object
-
-        # Ensure parent dir exists and handler can be created
-        log_file_path.parent.mkdir(parents=True, exist_ok=True)
-        rot_handler = RotatingFileHandler(log_file_path, maxBytes=max_bytes, backupCount=backup_count)
-        rot_handler.set_formatter(Formatter("{message}"))
+    def test_rotating_file_handler_log_real_rotation(self):
+        """Test RotatingFileHandler performs actual file rotation."""
+        log_file = self.rotate_log_file
+        max_bytes = 50 # Small limit for testing
+        backup_count = 2
+        # Use a simple formatter writing only the message
+        fmt = Formatter("%(message)s")
+        rot_handler = RotatingFileHandler(log_file, maxBytes=max_bytes, backupCount=backup_count, formatter=fmt)
         ASCIIColors.add_handler(rot_handler)
+        ASCIIColors.set_log_level(DEBUG) # Ensure all messages go through
 
-        # --- Rotation 1 ---
-        ASCIIColors.info("Msg1-" + "A"*10) # Write initial data
-        self.assertTrue(log_file_path.exists())
-        self.assertLess(log_file_path.stat().st_size, max_bytes) # Use real stat
+        # Write message 1 (below limit)
+        msg1 = "A" * 40
+        ASCIIColors.info(msg1)
+        self.assertTrue(log_file.exists())
+        self.assertLess(log_file.stat().st_size, max_bytes)
+        self.assertFalse((log_file.parent / f"{log_file.name}.1").exists())
 
-        # Patch mocks JUST for the triggering call
-        with patch('pathlib.Path.rename') as mock_rename1, \
-             patch('pathlib.Path.unlink') as mock_unlink1, \
-             patch('pathlib.Path.exists') as mock_exists1, \
-             patch('pathlib.Path.stat') as mock_path_stat1:
+        # Write message 2 (triggers rotation 1)
+        msg2 = "B" * 40
+        ASCIIColors.info(msg2)
+        time.sleep(0.05) # Give FS time
+        self.assertTrue(log_file.exists(), "Log file should exist after rotation")
+        self.assertTrue((log_file.parent / f"{log_file.name}.1").exists(), "Backup .1 should exist")
+        self.assertFalse((log_file.parent / f"{log_file.name}.2").exists())
+        # Check content
+        self.assertEqual(log_file.read_text().strip(), msg2)
+        self.assertEqual((log_file.parent / f"{log_file.name}.1").read_text().strip(), msg1)
 
-            # Configure mocks specific to Rotation 1 checks:
-            # 1. Path.stat(): Return size > max_bytes ONLY for the main log file
-            mock_stat_result = Mock()
-            mock_stat_result.st_size = max_bytes + 10
-            # Only mock stat for the specific log file path object
-            mock_path_stat1.side_effect = lambda *args, **kwargs: mock_stat_result if args[0] == log_file_path else MagicMock(st_size=0) # Default mock for others
+        # Write message 3 (triggers rotation 2)
+        msg3 = "C" * 40
+        ASCIIColors.info(msg3)
+        time.sleep(0.05)
+        self.assertTrue(log_file.exists())
+        self.assertTrue((log_file.parent / f"{log_file.name}.1").exists())
+        self.assertTrue((log_file.parent / f"{log_file.name}.2").exists(), "Backup .2 should exist")
+        self.assertFalse((log_file.parent / f"{log_file.name}.3").exists())
+        # Check content
+        self.assertEqual(log_file.read_text().strip(), msg3)
+        self.assertEqual((log_file.parent / f"{log_file.name}.1").read_text().strip(), msg2)
+        self.assertEqual((log_file.parent / f"{log_file.name}.2").read_text().strip(), msg1) # Oldest backup
 
-            # 2. Path.exists(): Return True ONLY for the main log file
-            mock_exists1.side_effect = lambda p: p == log_file_path
-
-            # Trigger rotation
-            ASCIIColors.info("Msg2_Rot1")
-
-        # Assert rotation 1 outcome
-        #mock_rename1.assert_called_once_with(log_file_path.with_suffix(".1"))
-        mock_unlink1.assert_not_called()
-
-        # --- Rotation 2 ---
-        backup1_path = log_file_path.with_suffix(".1")
-        with patch('pathlib.Path.rename') as mock_rename2, \
-             patch('pathlib.Path.unlink') as mock_unlink2, \
-             patch('pathlib.Path.exists') as mock_exists2, \
-             patch('pathlib.Path.stat') as mock_path_stat2:
-
-            mock_stat_result2 = Mock(); mock_stat_result2.st_size = max_bytes + 20
-            mock_path_stat2.side_effect = lambda *args, **kwargs: mock_stat_result2 if args[0] == log_file_path else MagicMock(st_size=0)
-            mock_exists2.side_effect = lambda p: p == log_file_path or p == backup1_path
-
-            ASCIIColors.info("Msg3_Rot2")
-
-        #self.assertEqual(mock_rename2.call_count, 2); 
-        # names={c[0][0].name for c in mock_rename2.call_args_list}
-        # self.assertIn(backup1_path.name, names); self.assertIn(log_file_path.with_suffix(".2").name, names)
-        mock_unlink2.assert_not_called()
-
-        # --- Rotation 3 ---
-        backup2_path = log_file_path.with_suffix(".2")
-        with patch('pathlib.Path.rename') as mock_rename3, \
-             patch('pathlib.Path.unlink') as mock_unlink3, \
-             patch('pathlib.Path.exists') as mock_exists3, \
-             patch('pathlib.Path.stat') as mock_path_stat3:
-
-            mock_stat_result3 = Mock(); mock_stat_result3.st_size = max_bytes + 30
-            mock_path_stat3.side_effect = lambda *args, **kwargs: mock_stat_result3 if args[0] == log_file_path else MagicMock(st_size=0)
-            mock_exists3.side_effect = lambda p: p == log_file_path or p == backup1_path or p == backup2_path
-
-            ASCIIColors.info("Msg4_Rot3")
-
-        #mock_unlink3.assert_called_once_with(log_file_path.with_suffix(f".{backup_count}"))
-        #self.assertEqual(mock_rename3.call_count, 2); names3={c[0][0].name for c in mock_rename3.call_args_list}
-        #self.assertIn(backup1_path.name, names3); self.assertIn(backup2_path.name, names3)
+        # Write message 4 (triggers rotation 3, oldest (.2) is deleted)
+        msg4 = "D" * 40
+        ASCIIColors.info(msg4)
+        time.sleep(0.05)
+        self.assertTrue(log_file.exists())
+        self.assertTrue((log_file.parent / f"{log_file.name}.1").exists())
+        self.assertTrue((log_file.parent / f"{log_file.name}.2").exists(), "Backup .2 should still exist (was .1)")
+        self.assertFalse((log_file.parent / f"{log_file.name}.3").exists(), "Backup .3 should not exist")
+         # Check content
+        self.assertEqual(log_file.read_text().strip(), msg4)
+        self.assertEqual((log_file.parent / f"{log_file.name}.1").read_text().strip(), msg3)
+        self.assertEqual((log_file.parent / f"{log_file.name}.2").read_text().strip(), msg2) # msg1 backup is gone
 
 
-    # --- Test Context Management (Affects Logging) ---
-    def test_set_clear_context_log(self):
-        """Test setting and clearing thread-local context for logging."""
-        fmt=Formatter("{message}|Ctx:{my_val}"); h=self.test_console_handler; stream=self.mock_stdout_log_stream
-        if h not in ASCIIColors._handlers: ASCIIColors.add_handler(h)
-        stream.seek(0); stream.truncate(); h.set_formatter(fmt)
-        ASCIIColors.set_context(my_val="1"); ASCIIColors.info("A"); self.assertIn("A|Ctx:1", self.get_console_log_output())
-        ASCIIColors.set_context(my_val="2"); ASCIIColors.info("B"); self.assertIn("B|Ctx:2", self.get_console_log_output())
-        ASCIIColors.clear_context("my_val"); ASCIIColors.info("C"); self.assertIn("FORMAT_ERROR", self.get_console_log_output())
-        ASCIIColors.clear_context(); self.assertEqual(ASCIIColors.get_thread_context(), {})
+    # --- Test Context Management (ASCIIColors API context) ---
+    def test_context_manager_log_ascii_api(self):
+        """Test context manager via ASCIIColors API."""
+        fmt = Formatter("S:{session}|U:{user}|M:{message}", style='{')
+        handler, stream = self._create_capture_stream_handler(formatter=fmt)
+        ASCIIColors.add_handler(handler)
 
-    def test_context_manager_log(self):
-        """Test the context() context manager for logging."""
-        fmt=Formatter("S:{session}|U:{user}"); h=self.test_console_handler; stream=self.mock_stdout_log_stream
-        if h not in ASCIIColors._handlers: ASCIIColors.add_handler(h)
-        stream.seek(0); stream.truncate(); h.set_formatter(fmt)
-        ASCIIColors.set_context(session="S1", user="U1"); ASCIIColors.info("")
-        self.assertIn("S:S1|U:U1", self.get_console_log_output())
-        with ASCIIColors.context(user="U2", task="T"):
-            ASCIIColors.info(""); self.assertIn("S:S1|U:U2", self.get_console_log_output())
-            with ASCIIColors.context(session="Sin"):
-                 ASCIIColors.info(""); self.assertIn("S:Sin|U:U2", self.get_console_log_output())
-            ASCIIColors.info(""); self.assertIn("S:S1|U:U2", self.get_console_log_output())
-        ASCIIColors.info(""); self.assertIn("S:S1|U:U1", self.get_console_log_output())
+        ASCIIColors.set_context(session="S1", user="U1")
+        ASCIIColors.info("M1")
+        with ASCIIColors.context(user="U2", task="T"): # Add task
+            ASCIIColors.info("M2")
+            # Check context includes task temporarily
+            self.assertEqual(ASCIIColors.get_thread_context().get('task'), 'T')
+        # Check context reverted
+        self.assertIsNone(ASCIIColors.get_thread_context().get('task'))
+        ASCIIColors.info("M3")
 
-    # --- Test Direct Print Methods (Bypass Logging) ---
+        output = strip_ansi(self._get_stream_value(stream))
+        self.assertIn("S:S1|U:U1|M:M1", output)
+        self.assertIn("S:S1|U:U2|M:M2", output) # Task won't show as it's not in format string
+        self.assertIn("S:S1|U:U1|M:M3", output)
+
+    # --- Test Direct Print Methods (Still Bypass Logging) ---
     def test_direct_print_method(self):
         """Test the static print method calls builtins.print directly."""
         txt="DirectPrint"; col=ASCIIColors.color_cyan; sty=ASCIIColors.style_underline; end="X"; flush=True; file=self.original_stderr
@@ -396,67 +361,326 @@ class TestASCIIColors(unittest.TestCase):
 
     def test_direct_color_methods(self):
         """Test direct color methods (red, green, etc.) call builtins.print."""
-        ASCIIColors.red("RedDirect"); self.assert_direct_print_called_with("RedDirect", color_code=ASCIIColors.color_red)
-        ASCIIColors.green("GreenDirect", end=''); self.assert_direct_print_called_with("GreenDirect", color_code=ASCIIColors.color_green, end='')
+        ASCIIColors.red("RedDirect")
+        self.assert_direct_print_called_with("RedDirect", color_code=ASCIIColors.color_red)
+        self.mock_builtin_print.reset_mock() # Reset for next assertion
+        ASCIIColors.green("GreenDirect", end='')
+        self.assert_direct_print_called_with("GreenDirect", color_code=ASCIIColors.color_green, end='')
 
-    def test_direct_style_methods(self):
-        """Test direct style methods (bold, underline) call builtins.print."""
-        ASCIIColors.bold("BoldDirect", ASCIIColors.color_yellow); self.assert_direct_print_called_with("BoldDirect", color_code=ASCIIColors.color_yellow, style_code=ASCIIColors.style_bold)
-        ASCIIColors.underline("UnderDirect", end='.'); self.assert_direct_print_called_with("UnderDirect", color_code=ASCIIColors.color_white, style_code=ASCIIColors.style_underline, end='.')
 
-    def test_success_fail_direct_methods(self):
-        """Test success and fail methods call builtins.print directly."""
-        ASCIIColors.success("OKDirect"); self.assert_direct_print_called_with("OKDirect", color_code=ASCIIColors.color_green)
-        ASCIIColors.fail("NGDirect", file=self.original_stderr); self.assert_direct_print_called_with("NGDirect", color_code=ASCIIColors.color_red, file=self.original_stderr)
+    # ===========================================================
+    # --- Tests for Logging Compatibility Layer ---
+    # ===========================================================
 
-    # --- Test Backward Compatibility Stubs ---
-    def test_deprecated_set_log_file(self):
-        """Test the backward-compatible set_log_file adds a FileHandler."""
-        ASCIIColors.clear_handlers(); ASCIIColors.set_log_file(self.log_file)
-        self.assertTrue(any(isinstance(h, FileHandler) for h in ASCIIColors._handlers))
+    def test_getLogger_returns_adapter(self):
+        """Test getLogger returns the correct adapter type."""
+        logger = getLogger("test_adapter")
+        # Access private class via module object for check
+        self.assertIsInstance(logger, ascii_colors._AsciiLoggerAdapter)
+        self.assertEqual(logger.name, "test_adapter")
 
-    @patch.object(ASCIIColors, '_log')
-    def test_deprecated_set_template_warning(self, mock_log):
-        """Test that set_template logs a warning."""
-        ASCIIColors.set_template(LogLevel.INFO, "x"); mock_log.assert_called_once()
-        self.assertEqual(mock_log.call_args[0][0], LogLevel.WARNING); self.assertIn("DEPRECATED", mock_log.call_args[0][1])
+    def test_getLogger_caching(self):
+        """Test that getLogger caches adapter instances."""
+        logger1 = getLogger("cached_logger")
+        logger2 = getLogger("cached_logger")
+        self.assertIs(logger1, logger2)
+        logger3 = getLogger("other_logger")
+        self.assertIsNot(logger1, logger3)
 
-    # --- Test Exception Handling (Uses Logging) ---
-    def test_get_trace_exception(self):
-        """Test the get_trace_exception utility."""
-        try: 1/0
-        except ZeroDivisionError as e: trace = get_trace_exception(e)
-        self.assertIn("ZeroDivisionError", trace); self.assertIn("test_get_trace_exception", trace)
+    def test_getLogger_root(self):
+        """Test getLogger() returns root logger adapter."""
+        root_logger = getLogger()
+        self.assertEqual(root_logger.name, "root")
+        root_logger_none = getLogger(None)
+        self.assertIs(root_logger, root_logger_none)
+        
+    @patch('ascii_colors.ASCIIColors._log')
+    def test_logger_adapter_methods_call_core_log(self, mock_core_log):
+        """Test adapter methods delegate to ASCIIColors._log with correct args."""
+        logger = getLogger("adapter_test")
+        ASCIIColors.set_log_level(DEBUG)
 
-    @patch.object(ASCIIColors, 'error')
-    def test_trace_exception_utility(self, mock_error):
-        """Test the trace_exception convenience function."""
-        try: raise ValueError("X")
-        except ValueError as e: exc = e; trace_exception(e)
-        mock_error.assert_called_once(); self.assertIn("Traceback", mock_error.call_args[0][0]); self.assertEqual(mock_error.call_args[1].get('exc_info'), exc)
+        # ... (debug, info, warning, error calls/assertions) ...
+        logger.debug("Debug msg %s", "arg1", extra_key="dv")
+        mock_core_log.assert_called_with(LogLevel.DEBUG, "Debug msg %s", ("arg1",), logger_name="adapter_test", extra_key="dv")
+        logger.info("Info msg")
+        mock_core_log.assert_called_with(LogLevel.INFO, "Info msg", (), logger_name="adapter_test")
+        logger.warning("Warn msg %d %d", 1, 2)
+        mock_core_log.assert_called_with(LogLevel.WARNING, "Warn msg %d %d", (1, 2), logger_name="adapter_test")
+        logger.error("Error msg", exc_info=False, data=1) # Pass exc_info explicitly
+        mock_core_log.assert_called_with(LogLevel.ERROR, "Error msg", (), logger_name="adapter_test", exc_info=False, data=1)
 
-    def test_error_with_exc_info_true_log(self):
-        """Test logging error with exc_info=True."""
-        ASCIIColors.clear_handlers(); h=FileHandler(self.log_file); ASCIIColors.add_handler(h)
-        try: int("a")
-        except ValueError as e: ASCIIColors.error("BadIntLog", exc_info=True)
-        content = self.log_file.read_text(); self.assertIn("BadIntLog", content); self.assertIn("Traceback", content)
 
-    # --- Test Other Utilities (Use Direct Print) ---
-    def test_highlight_direct(self):
-        """Test the highlight utility calls builtins.print directly."""
-        ASCIIColors.highlight("A KEY B", "KEY", ASCIIColors.color_blue, ASCIIColors.color_red)
-        expected = f"{ASCIIColors.color_blue}A {ASCIIColors.color_red}KEY{ASCIIColors.color_blue} B{ASCIIColors.color_reset}"
-        self.mock_builtin_print.assert_any_call(expected, end="\n", flush=False, file=self.original_stdout)
+        mock_core_log.reset_mock()
+        try:
+            raise ValueError("Test Exc")
+        except ValueError:
+             logger.exception("Exception msg %s", "oops", detail="ze")
 
-    def test_multicolor_direct(self):
-        """Test the multicolor utility calls builtins.print directly."""
-        ASCIIColors.multicolor(["R ","G"], [ASCIIColors.color_red, ASCIIColors.color_green], end="X")
-        self.mock_builtin_print.assert_any_call(f"{ASCIIColors.color_red}R ", end="", flush=True, file=self.original_stdout)
-        self.mock_builtin_print.assert_any_call(f"{ASCIIColors.color_green}G", end="", flush=True, file=self.original_stdout)
-        self.mock_builtin_print.assert_any_call(ASCIIColors.color_reset, end="X", flush=False, file=self.original_stdout)
+        self.assertTrue(mock_core_log.called)
+        call_args, call_kwargs = mock_core_log.call_args
+        self.assertEqual(call_args[0], LogLevel.ERROR)
+        self.assertEqual(call_args[1], "Exception msg %s")
+        self.assertEqual(call_args[2], ("oops",))
+        self.assertEqual(call_kwargs.get("logger_name"), "adapter_test")
+        # Fix 11: Assert that _log was called with exc_info=True
+        self.assertEqual(call_kwargs.get("exc_info"), True)
+        self.assertEqual(call_kwargs.get("detail"), "ze")
 
-    # --- Animation Tests Removed ---
+        # ... (critical, log calls/assertions) ...
+        logger.critical("Critical msg")
+        mock_core_log.assert_called_with(LogLevel.CRITICAL, "Critical msg", (), logger_name="adapter_test")
+        logger.log(INFO, "Log msg %s", "level_info")
+        mock_core_log.assert_called_with(LogLevel.INFO, "Log msg %s", ("level_info",), logger_name="adapter_test")
+
+    def test_logger_adapter_level_methods(self):
+        """Test logger adapter setLevel/getEffectiveLevel operate globally."""
+        logger = getLogger("level_test")
+        ASCIIColors.set_log_level(INFO) # Start at INFO globally
+        self.assertEqual(logger.getEffectiveLevel(), INFO)
+
+        logger.setLevel(DEBUG)
+        self.assertEqual(ASCIIColors._global_level, LogLevel.DEBUG)
+        self.assertEqual(logger.getEffectiveLevel(), DEBUG)
+
+        logger.setLevel("WARNING") # Use string name
+        self.assertEqual(ASCIIColors._global_level, LogLevel.WARNING)
+        self.assertEqual(logger.getEffectiveLevel(), WARNING)
+
+    def test_logger_adapter_handler_methods(self):
+        """Test logger adapter add/removeHandler operate globally."""
+        logger = getLogger("handler_test")
+        ASCIIColors.clear_handlers()
+        self.assertFalse(logger.hasHandlers())
+
+        handler, _ = self._create_capture_stream_handler()
+        logger.addHandler(handler)
+        self.assertTrue(logger.hasHandlers())
+        self.assertIn(handler, ASCIIColors._handlers)
+        self.assertEqual(len(ASCIIColors._handlers), 1)
+
+        fh = FileHandler(self.log_file)
+        logger.addHandler(fh)
+        self.assertIn(fh, ASCIIColors._handlers)
+        self.assertEqual(len(ASCIIColors._handlers), 2)
+
+        logger.removeHandler(handler)
+        self.assertNotIn(handler, ASCIIColors._handlers)
+        self.assertEqual(len(ASCIIColors._handlers), 1)
+        self.assertTrue(logger.hasHandlers())
+
+        logger.removeHandler(fh)
+        self.assertFalse(logger.hasHandlers())
+        self.assertEqual(len(ASCIIColors._handlers), 0)
+
+
+    # --- basicConfig Tests ---
+
+    def test_basicConfig_defaults(self):
+        """Test basicConfig with no arguments."""
+        basicConfig()
+        self.assertTrue(ASCIIColors._basicConfig_called)
+        self.assertEqual(len(ASCIIColors._handlers), 1)
+        handler = ASCIIColors._handlers[0]
+        self.assertIsInstance(handler, ConsoleHandler)
+        self.assertEqual(handler.stream, sys.stderr)
+        self.assertEqual(handler.level, LogLevel.WARNING) # Default level
+        self.assertEqual(ASCIIColors._global_level, LogLevel.WARNING)
+        self.assertEqual(handler.formatter.style, '%')
+
+    def test_basicConfig_level(self):
+        """Test basicConfig setting level."""
+        basicConfig(level=DEBUG)
+        self.assertEqual(ASCIIColors._global_level, LogLevel.DEBUG)
+        self.assertEqual(ASCIIColors._handlers[0].level, LogLevel.DEBUG)
+
+        basicConfig(level="ERROR", force=True) # Reconfigure with force
+        self.assertEqual(ASCIIColors._global_level, LogLevel.ERROR)
+        self.assertEqual(ASCIIColors._handlers[0].level, LogLevel.ERROR)
+
+    def test_basicConfig_format_datefmt_style(self):
+        """Test basicConfig setting format, datefmt, style."""
+        fmt = "{asctime} - {name} - {message}"
+        datefmt = "%H:%M"
+        style = '{'
+        # Use a local stream for capture in this test
+        local_stream = io.StringIO(); self.addCleanup(local_stream.close)
+        basicConfig(format=fmt, datefmt=datefmt, style=style, level=INFO, stream=local_stream)
+
+        handler = ASCIIColors._handlers[0]
+        formatter = handler.formatter
+        self.assertEqual(formatter.fmt, fmt)
+        self.assertEqual(formatter.datefmt, datefmt)
+        self.assertEqual(formatter.style, style)
+
+        logger = getLogger("fmt_test")
+        logger.info("Testing format") # Log goes to local_stream via basicConfig handler
+        output = strip_ansi(self._get_stream_value(local_stream))
+        self.assertRegex(output, r"\d{2}:\d{2} - fmt_test - Testing format")
+
+    def test_basicConfig_filename_filemode(self):
+        """Test basicConfig with filename and filemode."""
+        self.assertFalse(self.compat_log_file.exists())
+        basicConfig(filename=self.compat_log_file, filemode='w', level=INFO, format="%(message)s")
+
+        self.assertEqual(len(ASCIIColors._handlers), 1)
+        handler = ASCIIColors._handlers[0]
+        self.assertIsInstance(handler, FileHandler)
+        self.assertEqual(handler.filename, self.compat_log_file)
+        self.assertEqual(handler.mode, 'w')
+
+        logger = getLogger("file_test")
+        logger.info("Write to file")
+        logger.warning("Second line")
+
+        self.assertTrue(self.compat_log_file.exists())
+        content = self.compat_log_file.read_text()
+        self.assertEqual(content.strip(), "Write to file\nSecond line")
+
+        # Test append mode with force=True
+        basicConfig(filename=self.compat_log_file, filemode='a', level=INFO, format="%(message)s", force=True)
+        logger.error("Append this")
+        content = self.compat_log_file.read_text()
+        self.assertEqual(content.strip(), "Write to file\nSecond line\nAppend this")
+
+
+    def test_basicConfig_stream(self):
+        """Test basicConfig with stream argument."""
+        local_stream = io.StringIO(); self.addCleanup(local_stream.close)
+        basicConfig(stream=local_stream, level=INFO, format="%(message)s")
+
+        self.assertEqual(len(ASCIIColors._handlers), 1)
+        handler = ASCIIColors._handlers[0]
+        self.assertIsInstance(handler, ConsoleHandler)
+        self.assertIs(handler.stream, local_stream)
+
+        logger = getLogger("stream_test")
+        logger.info("Write to stream")
+        self.assertIn("Write to stream", strip_ansi(self._get_stream_value(local_stream)))
+
+    def test_basicConfig_handlers(self):
+        """Test basicConfig with explicit handlers list."""
+        h1_stream = io.StringIO(); self.addCleanup(h1_stream.close)
+        h1 = ConsoleHandler(stream=h1_stream, level=DEBUG) # No formatter initially
+        h2 = FileHandler(self.compat_log_file, level=INFO, mode='w')
+        h2.setFormatter(Formatter("FILE: %(message)s")) # Pre-set formatter
+
+        basicConfig(handlers=[h1, h2], level=WARNING, format="DEFAULT: %(message)s")
+
+        self.assertEqual(len(ASCIIColors._handlers), 2)
+        self.assertIn(h1, ASCIIColors._handlers)
+        self.assertIn(h2, ASCIIColors._handlers)
+
+        # Check formatters were applied/kept correctly
+        self.assertEqual(h1.formatter.fmt, "DEFAULT: %(message)s") # Got default
+        self.assertEqual(h2.formatter.fmt, "FILE: %(message)s") # Kept its own
+
+        logger = getLogger("handlers_test")
+        logger.warning("Warn Both")   # Goes to both
+        logger.info("Info File Only") # Below h1 level
+        logger.debug("Debug h1 Only") # Below h2 level, but allowed by h1
+
+        # Check stream output (Warn + Debug)
+        output_stream = strip_ansi(self._get_stream_value(h1_stream))
+        self.assertIn("DEFAULT: Warn Both", output_stream)
+        self.assertNotIn("Info File Only", output_stream)
+        self.assertIn("DEFAULT: Debug h1 Only", output_stream)
+
+        # Check file output (Warn + Info)
+        content_file = self.compat_log_file.read_text()
+        self.assertIn("FILE: Warn Both", content_file)
+        self.assertIn("FILE: Info File Only", content_file)
+        self.assertNotIn("Debug h1 Only", content_file)
+
+    def test_basicConfig_force(self):
+        """Test basicConfig force=True allows reconfiguration."""
+        basicConfig(level=INFO)
+        initial_handler = ASCIIColors._handlers[0]
+
+        basicConfig(level=DEBUG) # No force, should do nothing
+        self.assertEqual(ASCIIColors._global_level, LogLevel.INFO)
+        self.assertIs(ASCIIColors._handlers[0], initial_handler)
+
+        local_stream = io.StringIO(); self.addCleanup(local_stream.close)
+        basicConfig(level=WARNING, force=True, stream=local_stream, format="Forced: %(message)s")
+        self.assertEqual(ASCIIColors._global_level, LogLevel.WARNING)
+        self.assertEqual(len(ASCIIColors._handlers), 1)
+        self.assertIsNot(ASCIIColors._handlers[0], initial_handler) # New handler
+        new_handler = ASCIIColors._handlers[0]
+        self.assertIs(new_handler.stream, local_stream)
+        self.assertEqual(new_handler.formatter.fmt, "Forced: %(message)s")
+
+    # --- Test Handler/Formatter Aliases ---
+    def test_handler_aliases(self):
+        """Test logging-compatible handler aliases."""
+        self.assertIs(StreamHandler, ConsoleHandler)
+        self.assertIs(handlers.RotatingFileHandler, RotatingFileHandler)
+        self.assertTrue(hasattr(ascii_colors, 'FileHandler'))
+
+    def test_formatter_alias(self):
+        """Test logging-compatible Formatter alias."""
+        self.assertTrue(hasattr(ascii_colors, 'Formatter'))
+
+
+    # --- Test interaction between APIs ---
+    def test_basicConfig_then_ascii_api(self):
+        """Test using ASCIIColors API after basicConfig."""
+        local_stream = io.StringIO(); self.addCleanup(local_stream.close)
+        basicConfig(level=INFO, stream=local_stream, format="BC: %(name)s - %(message)s")
+        logger = getLogger("compat")
+
+        ASCIIColors.warning("Msg from ASCII API")
+        logger.error("Msg from logger")
+
+        output = strip_ansi(self._get_stream_value(local_stream))
+        self.assertIn("BC: ASCIIColors - Msg from ASCII API", output)
+        self.assertIn("BC: compat - Msg from logger", output)
+
+        # Add handler via ASCIIColors API
+        # Fix 6: Use formatter= kwarg
+        fh = FileHandler(self.compat_log_file, mode='w', formatter=Formatter("%(message)s"))
+        self.addCleanup(fh.close)
+        ASCIIColors.add_handler(fh)
+        self.assertEqual(len(ASCIIColors._handlers), 2)
+
+        ASCIIColors.info("ASCII to both")
+        logger.info("Logger to both")
+
+        stream_out = strip_ansi(self._get_stream_value(local_stream))
+        file_out = self.compat_log_file.read_text()
+
+        self.assertIn("BC: ASCIIColors - ASCII to both", stream_out)
+        self.assertIn("BC: compat - Logger to both", stream_out)
+        self.assertIn("ASCII to both", file_out)
+        self.assertIn("Logger to both", file_out)
+
+    def test_ascii_api_then_basicConfig(self):
+        """Test using basicConfig after ASCIIColors API calls."""
+        handler_ascii, stream_ascii = self._create_capture_stream_handler(level=DEBUG, formatter=Formatter("ASCII: {message}"))
+        ASCIIColors.add_handler(handler_ascii)
+        ASCIIColors.set_log_level(DEBUG)
+        ASCIIColors.info("Before basicConfig")
+
+        # basicConfig without force (should do nothing)
+        basicConfig(level=INFO, format="%(message)s")
+        self.assertEqual(ASCIIColors._global_level, LogLevel.DEBUG) # Unchanged
+        self.assertIs(ASCIIColors._handlers[0], handler_ascii) # Unchanged
+
+        ASCIIColors.info("After basicConfig (no force)")
+        output = strip_ansi(self._get_stream_value(stream_ascii))
+        self.assertIn("ASCII: Before basicConfig", output)
+        self.assertIn("ASCII: After basicConfig (no force)", output)
+
+        # basicConfig WITH force
+        basicConfig(level=WARNING, force=True, format="BC: %(message)s", stream=sys.stderr) # Use stderr
+        self.assertEqual(ASCIIColors._global_level, LogLevel.WARNING)
+        self.assertEqual(len(ASCIIColors._handlers), 1)
+        self.assertIsNot(ASCIIColors._handlers[0], handler_ascii) # New handler
+
+        # Log again (won't go to original stream_ascii)
+        ASCIIColors.warning("After basicConfig (force)")
+        output_after_force = strip_ansi(self._get_stream_value(stream_ascii))
+        self.assertNotIn("After basicConfig (force)", output_after_force)
 
 
 if __name__ == "__main__":

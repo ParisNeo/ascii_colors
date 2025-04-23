@@ -14,7 +14,7 @@ with open("README.md", "r", encoding="utf-8") as fh:
 
 setup(
     name="ascii_colors",
-    version="0.7.6",  # Updated version
+    version="0.8.0",  # Updated version
     description="A Python library for rich terminal output with advanced logging features.",
     long_description=long_description,
     long_description_content_type="text/markdown",  # Specify markdown format
