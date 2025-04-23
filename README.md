@@ -7,7 +7,7 @@
 <!-- Optional: Add build status if you set up CI -->
 <!-- [![Build Status](https://github.com/ParisNeo/ascii_colors/actions/workflows/your-ci-workflow.yml/badge.svg)](https://github.com/ParisNeo/ascii_colors/actions/workflows/your-ci-workflow.yml) -->
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
-[![Documentation Status](https://readthedocs.org/projects/ascii_colors/badge/?version=latest)](https://ParisNeo.github.io/ascii_colors/) 
+[![Documentation Status](https://readthedocs.org/projects/ascii_colors/badge/?version=latest)](https://parisneo.github.io/ascii_colors/) 
 
 Tired of bland terminal output? Need powerful logging without the boilerplate? **ASCIIColors** is your solution!
 
