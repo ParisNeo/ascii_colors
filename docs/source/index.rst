@@ -3,7 +3,7 @@
 Welcome to ascii_colors's documentation!
 ========================================
 
-**ASCIIColors** Tired of bland terminal output? Need powerful logging without the boilerplate? **ASCIIColors** is your solution!
+Tired of bland terminal output? Need powerful logging without the boilerplate? **ASCIIColors** is your solution!
 
 It combines beautiful, effortless **color printing** with a **flexible, modern logging system**. Now featuring a compatibility layer mimicking Python's standard `logging` module, it makes transitioning or integrating easier than ever. Plus, it includes handy **terminal utilities** like spinners and highlighting.
 
