@@ -1,74 +1,99 @@
 # conf.py
+# (Keep the previous version with Furo theme, extensions, etc.)
 
 import os
 import sys
-import toml  # Import the toml library
+import toml
 from datetime import datetime
+
 # -- Path setup --------------------------------------------------------------
-# Point Sphinx to the project root directory to find the source code
-sys.path.insert(0, os.path.abspath('../..')) # Go up two levels from source/ to project root
+sys.path.insert(0, os.path.abspath('../..'))
 
 # -- Project information -----------------------------------------------------
-# Load project metadata from pyproject.toml
 def get_project_meta():
-    """Reads project metadata from pyproject.toml"""
     pyproject_path = os.path.abspath('../../pyproject.toml')
     if os.path.exists(pyproject_path):
         with open(pyproject_path, 'r') as f:
             data = toml.load(f)
-        # Check both potential locations for project metadata
         if 'project' in data:
             return data['project']
-        elif 'tool' in data and 'poetry' in data['tool']: # Support poetry too if used
+        elif 'tool' in data and 'poetry' in data['tool']:
             return data['tool']['poetry']
-    return {} # Return empty dict if file not found or no metadata
+    return {}
 
 project_meta = get_project_meta()
-
 project = project_meta.get('name', 'ascii_colors')
-author = ", ".join([a.get('name', '') for a in project_meta.get('authors', [{'name': 'Unknown'}])]) # Handle author format
-release = project_meta.get('version', '0.0.0') # Get version from pyproject.toml
-copyright = f'{datetime.now().year}, {author}' # Dynamic copyright year
+author = ", ".join([a.get('name', '') for a in project_meta.get('authors', [{'name': 'Unknown'}])])
+release = project_meta.get('version', '0.0.0')
+copyright = f'{datetime.now().year}, {author}'
 
 # -- General configuration ---------------------------------------------------
 extensions = [
-    'sphinx.ext.autodoc',      # Include documentation from docstrings
-    'sphinx.ext.napoleon',     # Support Google and NumPy style docstrings
-    'sphinx.ext.viewcode',     # Add links to highlighted source code
-    'sphinx.ext.intersphinx',  # Link to other projects' documentation (e.g., Python)
-    'sphinx.ext.githubpages',  # Helps with GitHub Pages deployment (_static path etc.)
-    'sphinx_autobuild',        # For auto-reloading local builds
-    'sphinx_copybutton',
-    'myst_parser'
+    'sphinx.ext.autodoc',
+    'sphinx.ext.napoleon',      # Support Google and NumPy style docstrings
+    'sphinx.ext.viewcode',
+    'sphinx.ext.intersphinx',
+    'sphinx.ext.githubpages',
+    'sphinx_copybutton',        # Add copy buttons to code blocks
+    'myst_parser',              # Allow Markdown files
+    # 'sphinx_autobuild',       # Usually run from command line, not needed in conf
 ]
 
 templates_path = ['_templates']
 exclude_patterns = []
+source_suffix = {
+    '.rst': 'restructuredtext',
+    '.md': 'markdown', # If using myst_parser for .md files
+}
 
 # -- Options for HTML output -------------------------------------------------
-# Use the Furo theme
-html_theme = 'furo'
+html_theme = 'furo' # Use the Furo theme
 html_static_path = ['_static']
-# html_logo = "_static/logo.png"  # Optional: Add a logo file here
+# html_logo = "_static/logo.png" # Optional: Add a logo file
 # html_favicon = "_static/favicon.ico" # Optional: Add a favicon
 
-# Theme options are theme-specific
+# Furo theme options
 html_theme_options = {
     "source_repository": "https://github.com/ParisNeo/ascii_colors/",
-    "source_branch": "main", # Or your primary branch name
+    "source_branch": "main",
     "source_directory": "docs/source/",
+    "light_css_variables": {
+        "color-brand-primary": "#3498db", # Example: A light blue primary color
+        "color-brand-content": "#2c3e50",
+    },
+    "dark_css_variables": {
+        "color-brand-primary": "#3498db",
+        "color-brand-content": "#ecf0f1",
+    },
 }
 
 # -- Intersphinx configuration ---------------------------------------------
-# Example configuration for intersphinx: refer to the Python standard library.
 intersphinx_mapping = {'python': ('https://docs.python.org/3', None)}
 
 # -- Autodoc configuration -------------------------------------------------
-autodoc_member_order = 'bysource' # Order members by source code order
+autodoc_member_order = 'bysource'
 autodoc_default_options = {
     'members': True,
-    'undoc-members': True, # Include members without docstrings (use with caution)
+    'undoc-members': False, # Usually better to document explicitly
     'show-inheritance': True,
 }
-# Optional: Tell autodoc to mock imports if some heavy dependencies aren't needed for docs build
-# autodoc_mock_imports = ["dependency1", "dependency2"]
+# Ensure type hints are used
+autodoc_typehints = "description" # Show type hints in the description
+# autodoc_typehints_description_target = "all" # Or 'documented'
+
+# -- Napoleon settings (for Google/NumPy docstrings) -------------------------
+napoleon_google_docstring = True
+napoleon_numpy_docstring = True
+napoleon_include_init_with_doc = True
+napoleon_include_private_with_doc = False
+napoleon_use_admonition_for_examples = True
+napoleon_use_admonition_for_notes = True
+napoleon_use_admonition_for_references = False
+
+# -- Myst Parser Settings ----------------------------------------------------
+myst_enable_extensions = [
+    "colon_fence", # Allow ```python blocks
+    "smartquotes",
+    "deflist",
+]
+myst_heading_anchors = 3 # Auto-generate anchors for headings up to level 3
