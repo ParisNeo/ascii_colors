@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.8.1] - 2025-04-25
+
+### Changed
+*   **Documentation Overhaul:**
+    *   Rewrote and significantly expanded the Sphinx documentation.
+    *   Added a clear "Core Concepts: Direct Print vs. Logging" section.
+    *   Improved Quick Start guide, emphasizing the `import ascii_colors as logging` pattern.
+    *   Greatly expanded the Usage Guide with examples for `basicConfig`, manual setup (multiple handlers, JSON, rotation), context management, and utilities.
+    *   Added a comprehensive list of color/style constants to the Usage Guide.
+    *   Updated API Reference (`api.rst`) for completeness and clarity.
+    *   Configured Sphinx (`conf.py`) to use the Furo theme and read project metadata from `pyproject.toml`.
+    *   Updated `README.md` to reflect documentation structure, improved examples, and added core concept explanation.
+*   **Code Refinements:**
+    *   Minor improvements to docstrings for clarity and consistency.
+    *   Reviewed `basicConfig`, formatter, and handler logic to ensure alignment with documentation. (No significant behavior changes from 0.8.0).
+*   **Project Files:**
+    *   Updated `pyproject.toml` version and added `toml` to dev dependencies. Added documentation URL.
+    *   Updated `README.md` with new documentation link and content.
 
 ## [0.8.0] - 2025-04-24
 
