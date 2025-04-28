@@ -3652,7 +3652,7 @@ if __name__ == "__main__":
         # Log the exception using the logging system
         trace_exception(e)
 
-
+    input(">>")
     # --- Menu Demo ---
     print("\n--- Menu Demo (Arrow Key Navigation) ---")
     ASCIIColors.print("Note: Menu Demo requires interactive terminal with arrow key support.", color=ASCIIColors.color_yellow)
