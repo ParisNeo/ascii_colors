@@ -621,6 +621,48 @@ except Exception as e:
 ```
 
 ---
+**b) User Interaction (`confirm` / `prompt`)**
+
+Easily get confirmations or text input from the user directly in the terminal. These methods use **Direct Printing** for the prompts.
+
+*   **`ASCIIColors.confirm(question, default_yes=None, ...)`**: Asks a Yes/No question.
+    *   Handles `y/yes` and `n/no` (case-insensitive).
+    *   `default_yes=True`: Enter defaults to Yes (`[Y/n]`).
+    *   `default_yes=False`: Enter defaults to No (`[y/N]`).
+    *   `default_yes=None`: Enter is invalid (`[y/n]`).
+    *   Returns `True` for Yes, `False` for No (or Ctrl+C).
+
+*   **`ASCIIColors.prompt(prompt_text, color=..., style=..., ...)`**: Displays a styled prompt and reads a line of text.
+    *   Returns the user's input string.
+    *   Returns an empty string if cancelled with Ctrl+C.
+
+```python
+from ascii_colors import ASCIIColors
+
+# --- Confirmation Examples ---
+delete_it = ASCIIColors.confirm("Are you sure you want to delete the file?", default_yes=False)
+if delete_it:
+    print("Deleting...")
+else:
+    print("Deletion cancelled.")
+
+proceed = ASCIIColors.confirm("Continue with installation?", default_yes=True)
+
+
+# --- Prompt Example ---
+api_key = ASCIIColors.prompt(
+    "Enter your API key: ",
+    color=ASCIIColors.color_cyan,
+    style=ASCIIColors.style_bold
+)
+if api_key:
+    print("API Key received.")
+else:
+    # Could be empty input or Ctrl+C
+    print("API Key entry skipped or cancelled.")
+```
+
+---
 
 ## 📚 API & Documentation
 

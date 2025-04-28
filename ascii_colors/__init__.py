@@ -2310,6 +2310,96 @@ class ASCIIColors:
         # Return the result (must cast as TypeVar doesn't guarantee non-None)
         return cast(_T, final_result)
 
+    # --- NEW: User Interaction Utilities ---
+    @staticmethod
+    def confirm(
+        question: str,
+        default_yes: Optional[bool] = None,
+        prompt_color: str = color_yellow, # Default prompt color for questions
+        file: StreamType = sys.stdout
+    ) -> bool:
+        """
+        Asks a yes/no question via direct terminal interaction and returns the result.
+
+        Handles 'y/yes' and 'n/no' (case-insensitive) input. Supports setting a
+        default response if the user just presses Enter. Re-prompts on invalid input.
+        Uses direct printing, bypassing the logging system.
+
+        Args:
+            question: The question text to display.
+            default_yes: If True, Enter defaults to Yes. If False, Enter defaults to No.
+                         If None, Enter is invalid input and requires y/n.
+            prompt_color: ANSI color code for the question and prompt suffix.
+            file: The stream to write the prompt to and read input from.
+
+        Returns:
+            True if the user confirmed (yes), False otherwise (no).
+        """
+        if default_yes is True:
+            suffix = "[Y/n]"
+        elif default_yes is False:
+            suffix = "[y/N]"
+        else:
+            suffix = "[y/n]"
+
+        prompt = f"{question} {suffix}? "
+
+        while True:
+            try:
+                # Use ASCIIColors.print for consistent styling and stream handling
+                ASCIIColors.print(prompt, color=prompt_color, style="", end="", flush=True, file=file)
+                choice = input().lower().strip()
+
+                if choice in ('y', 'yes'):
+                    return True
+                elif choice in ('n', 'no'):
+                    return False
+                elif choice == '' and default_yes is not None:
+                    return default_yes
+                else:
+                    # Re-prompt explicitly on invalid input
+                    ASCIIColors.print("Invalid input. Please enter 'y' or 'n'.", color=ASCIIColors.color_red, file=file)
+                    # Loop continues
+
+            except KeyboardInterrupt:
+                ASCIIColors.print("\nConfirmation cancelled.", color=ASCIIColors.color_red, file=file)
+                return False # Treat Ctrl+C as 'No' or cancellation
+
+    @staticmethod
+    def prompt(
+        prompt_text: str,
+        color: str = color_green, # Default prompt color for general input
+        style: str = "",
+        file: StreamType = sys.stdout
+    ) -> str:
+        """
+        Displays a prompt and reads a line of text input from the user.
+
+        Uses direct printing for the prompt, bypassing the logging system.
+
+        Args:
+            prompt_text: The text to display before the input cursor.
+            color: ANSI color code for the prompt text.
+            style: ANSI style code for the prompt text.
+            file: The stream to write the prompt to and read input from.
+
+        Returns:
+            The string entered by the user (stripped of leading/trailing whitespace).
+            Returns an empty string if the user cancels with Ctrl+C during input().
+        """
+        full_prompt = f"{style}{color}{prompt_text}{ASCIIColors.color_reset}"
+        try:
+            # Print without newline, ensure flushed
+            print(full_prompt, end="", flush=True, file=file)
+            response = input()
+            return response # input() already strips the newline
+
+        except KeyboardInterrupt:
+            # Print a newline to move past the prompt if interrupted
+            print(file=file)
+            ASCIIColors.print("Input cancelled.", color=ASCIIColors.color_red, file=file)
+            return "" # Return empty string on cancellation
+
 
 # --- Global convenience function ---
 def trace_exception(ex: BaseException) -> None:
@@ -3628,7 +3718,42 @@ if __name__ == "__main__":
     root_menu.run()
     ASCIIColors.print("\nMenu demo finished or quit.", color=ASCIIColors.color_yellow)
 
-    
+    # --- Prompt/Confirm Demo ---
+    print("\n--- Prompt/Confirm Demo ---")
+    try:
+        # Example Prompt
+        user_name = ASCIIColors.prompt("Please enter your name: ", color=ASCIIColors.color_cyan)
+        if user_name:
+            ASCIIColors.success(f"Hello, {user_name}!")
+        else:
+             ASCIIColors.yellow("No name entered.")
+
+        # Example Confirm (Default Yes)
+        should_continue = ASCIIColors.confirm("Do you want to proceed with the operation?", default_yes=True)
+        if should_continue:
+            ASCIIColors.info("Proceeding...")
+            # Simulate operation
+            time.sleep(0.5)
+            ASCIIColors.green("Operation complete.")
+        else:
+            ASCIIColors.warning("Operation cancelled by user.")
+
+        # Example Confirm (Default No)
+        overwrite = ASCIIColors.confirm("File exists. Overwrite?", default_yes=False)
+        if overwrite:
+            ASCIIColors.yellow("Overwriting file...")
+        else:
+            ASCIIColors.info("Skipping file.")
+
+        # Example Confirm (No Default)
+        enable_feature = ASCIIColors.confirm("Enable experimental feature?", default_yes=None)
+        if enable_feature:
+             ASCIIColors.magenta("Experimental feature enabled.")
+        else:
+             ASCIIColors.blue("Experimental feature remains disabled.")
+
+    except Exception as e:
+        ASCIIColors.error(f"Error during prompt/confirm demo: {e}")
     # --- Cleanup Demo Files ---
     print("\n--- Cleanup ---")
     # Explicitly call shutdown BEFORE attempting to delete files in the demo,

@@ -10,25 +10,42 @@ readme = "README.md" # Specifies the file for the long description and content t
 license = "Apache-2.0"
 requires-python = ">=3.8"
 keywords = [
-    "logging", "color", "terminal", "console", "ansi", "style",
-    "format", "json", "log rotation", "context",
+    # Core Concepts
+    "ansi", "color", "colors", "style", "terminal", "console", "cli", "rich text",
+    # Logging Features
+    "logging", "logger", "log", "structured logging", "log formatting", "json logging",
+    "file logging", "log rotation", "python logging", "context logging",
+    # Utility Features
+    "progress bar", "progress", "tqdm", "indicator",
+    "menu", "cli menu", "interactive menu", "terminal menu", "navigation",
+    "prompt", "confirm", "input", "user interaction",
+    "animation", "spinner", "utility",
 ]
 authors = [
     { name = "ParisNeo", email = "parisneo_ai@gmail.com" },
 ]
 classifiers = [
+    # Status
     "Development Status :: 4 - Beta",
+    # Audience
     "Intended Audience :: Developers",
+    # Environment
+    "Environment :: Console", # Added more specific environment
+    # OS
     "Operating System :: OS Independent",
+    # Language Version Support
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    # Topics
     "Topic :: System :: Logging",
     "Topic :: Terminals",
     "Topic :: Utilities",
+    "Topic :: Software Development :: Libraries :: Python Modules", # Added library topic
+    "Topic :: System :: Shells", # Relevant for CLI interactions
 ]
 
 # No runtime dependencies needed for core functionality

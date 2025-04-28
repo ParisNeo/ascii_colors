@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.1] - 2025-04-28
+
+### Added
+*   **`ASCIIColors.confirm()`:** Added a static utility method to ask yes/no questions interactively, handling defaults and input validation. Uses direct printing.
+*   **`ASCIIColors.prompt()`:** Added a static utility method to get text input from the user with a styled prompt. Uses direct printing.
+*   Added tests for `confirm` and `prompt` methods.
+*   Added documentation for `confirm` and `prompt` to README, usage guide, and API reference.
+
+## [0.10.0] - 2025-04-28
+
+### Added
+*   **Interactive `Menu` Class:** Introduced `ascii_colors.Menu` for creating interactive, styled command-line menus featuring:
+    *   **Arrow Key Navigation:** Use Up/Down arrows to navigate items.
+    *   **Enter Selection:** Select items using the Enter key.
+    *   Automatic 'Back'/'Quit' options.
+    *   Customizable styling for title, items, selection, and prompt using `ASCIIColors`.
+    *   Option to hide the cursor during interaction.
+    *   Error handling for actions.
+*   Added `Menu` demonstration to the `if __name__ == "__main__":` block in `__init__.py`.
+*   Added `Menu` tests to `tests/test_ascii_colors.py` (mocking terminal input).
+*   Added `Menu` documentation to `usage.rst` and `api.rst`.
+*   Added internal `_get_key()` helper for cross-platform single-character input reading.
+*   Added necessary imports (`platform`, `msvcrt`, `termios`, `tty`).
+
+### Changed
+*   **Menu Input:** Replaced previous number/letter key selection in `Menu` with arrow key navigation and Enter selection. Removed `key` parameter from `add_action` and `add_submenu`.
+
+### Fixed
+*   Improved cleanup logic in `if __name__ == "__main__"` block to attempt removal of specific test files.
+
 ## [0.9.0] - 2025-24-27
 
 ### Added
