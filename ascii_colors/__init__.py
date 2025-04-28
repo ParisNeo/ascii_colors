@@ -49,7 +49,36 @@ from enum import IntEnum
 from pathlib import Path
 from threading import Lock
 from typing import (Any, Callable, Dict, List, Optional, TextIO, Tuple, Type,
-                    Union, cast, Text, TypeVar, ContextManager, IO)
+                    Union, cast, Text, TypeVar, ContextManager, IO, Iterable, Sized)
+
+import math
+import re
+
+# --- Helper functions ---
+
+# Regular expression to match ANSI escape sequences.
+# \x1B is the ESC character.
+# It matches two main forms:
+# 1. ESC followed by a single character from '@' to '_' (used for some simple commands).
+# 2. ESC followed by '[' (Control Sequence Introducer - CSI), then optional parameters
+#    (digits, ';', '?'), optional intermediate characters (' ' to '/'), and a final
+#    command character ('@' to '~'). This covers most color/style/cursor codes like \x1B[31m.
+ANSI_ESCAPE_REGEX = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+
+def strip_ansi(text: str) -> str:
+    """
+    Removes ANSI escape sequences (like color codes) from a string.
+
+    Args:
+        text: The input string potentially containing ANSI codes.
+
+    Returns:
+        The string with ANSI codes removed.
+    """
+    if not isinstance(text, str):
+        # Handle potential non-string input gracefully in tests
+        return str(text)
+    return ANSI_ESCAPE_REGEX.sub("", text)
 
 # --- Log Level Enum & Constants ---
 
@@ -2218,6 +2247,356 @@ def trace_exception(ex: BaseException) -> None:
     # Uses the logging system, not direct print
     ASCIIColors.error(f"Exception Traceback ({type(ex).__name__})", exc_info=ex)
 
+
+# --- TQDM-like ProgressBar ---
+
+class ProgressBar:
+    """
+    A customizable, thread-safe progress bar similar to `tqdm`, using `ASCIIColors` for styling.
+
+    Can be used as an iterator wrapper or a context manager for manual updates.
+
+    Uses direct terminal printing (`ASCIIColors.print` with `\\r`) and is independent
+    of the logging system.
+
+    Example Usage:
+
+    .. code-block:: python
+
+        from ascii_colors import ProgressBar
+        import time
+
+        # As an iterator wrapper
+        for i in ProgressBar(range(100), desc="Processing Items"):
+            time.sleep(0.05)
+
+        # Manual control with context manager
+        total_steps = 50
+        with ProgressBar(total=total_steps, desc="Manual Task", color=ASCIIColors.color_cyan) as pbar:
+            for step in range(total_steps):
+                # Simulate work
+                time.sleep(0.02)
+                pbar.update(1)
+                if step == total_steps // 2:
+                    pbar.set_description("Halfway Done")
+
+    Attributes:
+        iterable (Optional[Iterable]): The iterable being processed (if provided).
+        total (Optional[int]): The total number of expected iterations.
+        desc (str): Prefix for the progress bar description.
+        unit (str): String that will be used to define the unit of each iteration.
+        ncols (Optional[int]): The width of the entire output message. If specified,
+                               disables dynamic sizing. If None (default), tries to
+                               use terminal width.
+        bar_format (Optional[str]): Specify a custom bar string format. May contain
+                                    '{l_bar}', '{bar}', '{r_bar}'. Default includes
+                                    desc, %, bar, count, rate, eta.
+        leave (bool): If True, leaves the finished progress bar on screen.
+        position (int): Specify the line offset to print this bar (0 - default).
+                        Useful for managing multiple bars, but requires careful
+                        manual management. Note: `ascii_colors` doesn't fully manage
+                        nested/multiple bars like `tqdm` might.
+        mininterval (float): Minimum progress display update interval (seconds).
+        color (str): ANSI color code for the progress bar/text.
+        style (str): ANSI style code for the progress bar/text.
+        background (str): ANSI background code for the progress bar/text.
+        progress_char (str): Character(s) representing filled progress.
+        empty_char (str): Character(s) representing remaining progress.
+        bar_style (str): Style of the bar ('fill', 'blocks'). Default 'fill'.
+        file (StreamType): Specify output file (default: sys.stdout).
+    """
+    _default_bar_format = "{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}{unit}]"
+    _block_chars = [" ", "▏", "▎", "▍", "▌", "▋", "▊", "▉", "█"] # Unicode blocks for 'blocks' style
+
+    def __init__(
+        self,
+        iterable: Optional[Iterable[_T]] = None,
+        total: Optional[int] = None,
+        desc: str = "",
+        unit: str = "it",
+        ncols: Optional[int] = None,
+        bar_format: Optional[str] = None,
+        leave: bool = True,
+        position: int = 0, # Note: Position handling is basic here
+        mininterval: float = 0.1, # Minimum time between updates
+        color: str = ASCIIColors.color_green, # Default color
+        style: str = "",
+        background: str = "",
+        progress_char: str = "█", # Block character
+        empty_char: str = "░", # Lighter block character
+        bar_style: str = "fill", # 'fill' or 'blocks'
+        file: Optional[StreamType] = None,
+        *args: Any, # Absorb other tqdm args for basic compatibility
+        **kwargs: Any
+    ):
+        self.iterable = iterable
+        self.desc = desc
+        self.unit = unit
+        self.ncols = ncols
+        self.bar_format = bar_format if bar_format is not None else self._default_bar_format
+        self.leave = leave
+        self.position = position # Basic support
+        self.mininterval = mininterval
+        self.color = color
+        self.style = style
+        self.background = background
+        self.progress_char = progress_char
+        self.empty_char = empty_char
+        self.bar_style = bar_style.lower()
+        self.file = file if file is not None else sys.stdout
+
+        self._iterator: Optional[Iterator[_T]] = None
+        self._lock = Lock() # For thread safety
+        self.n = 0 # Current progress
+        self.start_t = time.time()
+        self.last_print_n = 0
+        self.last_print_t = self.start_t
+        self.elapsed = 0.0
+        self._closed = False
+
+        # Determine total
+        if total is not None:
+            self.total = total
+        elif iterable is not None:
+            try:
+                self.total = len(cast(Sized, iterable)) # Attempt to get length
+            except (TypeError, AttributeError):
+                self.total = None # Cannot determine total
+        else:
+            self.total = None
+
+    def __iter__(self) -> 'ProgressBar[_T]':
+        if self.iterable is None:
+            raise ValueError("ProgressBar needs an iterable to be used in a for loop")
+        self._iterator = iter(self.iterable)
+        self.start_t = time.time() # Reset timer on iteration start
+        self.last_print_t = self.start_t
+        self.n = 0
+        self._render() # Initial render
+        return self
+
+    def __next__(self) -> _T:
+        if self._iterator is None:
+            raise RuntimeError("Cannot call next() before __iter__()")
+        try:
+            value = next(self._iterator)
+            self.update(1)
+            return value
+        except StopIteration:
+            self.close()
+            raise
+
+    def __enter__(self) -> 'ProgressBar[_T]':
+        self.start_t = time.time() # Reset timer on context entry
+        self.last_print_t = self.start_t
+        self.n = 0
+        self._render() # Initial render
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        self.close()
+
+    def update(self, n: int = 1) -> None:
+        """Increment the progress bar by `n` steps."""
+        if self._closed:
+            return
+        with self._lock:
+            self.n += n
+            # Throttle rendering based on time interval
+            current_t = time.time()
+            if current_t - self.last_print_t >= self.mininterval:
+                self._render()
+                self.last_print_t = current_t
+                self.last_print_n = self.n
+
+    def set_description(self, desc: str) -> None:
+        """Update the description text."""
+        with self._lock:
+            self.desc = desc
+            # Consider re-rendering immediately or rely on next update?
+            # Re-rendering for description change is often desired.
+            self._render() # Re-render to show new description
+
+    def close(self) -> None:
+        """Cleanup the progress bar."""
+        if self._closed:
+            return
+        with self._lock:
+            self._closed = True
+            # Final render if leaving the bar
+            if self.leave:
+                self._render(final=True)
+            # Move to the next line after the progress bar
+            # Check if file is valid before printing newline
+            if self.file and hasattr(self.file, 'write') and not getattr(self.file, 'closed', False):
+                 try:
+                    self.file.write("\n")
+                    self.file.flush()
+                 except Exception:
+                     # Handle potential errors writing newline (e.g., broken pipe)
+                     pass # Silently ignore on close error
+
+    def _format_time(self, seconds: float) -> str:
+        """Formats seconds into HH:MM:SS"""
+        if not math.isfinite(seconds) or seconds < 0:
+            return "??:??"
+        m, s = divmod(seconds, 60)
+        h, m = divmod(m, 60)
+        if h:
+            return f"{int(h):02d}:{int(m):02d}:{int(s):02d}"
+        else:
+            return f"{int(m):02d}:{int(s):02d}"
+
+    def _estimate_eta(self) -> float:
+        """Estimate remaining time (ETA) in seconds."""
+        if self.total is None or self.total == 0 or self.n == 0 or self.elapsed <= 0:
+            return float('inf') # Cannot estimate
+        rate = self.n / self.elapsed
+        if rate == 0:
+            return float('inf')
+        remaining_items = self.total - self.n
+        return remaining_items / rate
+
+    def _get_terminal_width(self) -> int:
+        """Get terminal width, default to 80 if unavailable."""
+        if self.ncols is not None:
+            return self.ncols
+        try:
+            # Use shutil.get_terminal_size, fallback to 80
+            width = shutil.get_terminal_size((80, 20)).columns
+            # Add a small safety margin if width is determined
+            return max(10, width) # Ensure minimum width
+        except (OSError, AttributeError): # Handle errors/non-terminal environments
+            return 80 # Default width
+
+    def _render(self, final: bool = False) -> None:
+        """Render the progress bar to the stream."""
+        # This method MUST be called with the lock held
+
+        if self._closed and not final: # Don't render if closed unless it's the final call
+             return
+
+        # Calculate metrics
+        self.elapsed = time.time() - self.start_t
+        current_n = self.n
+        current_total = self.total
+        desc = f"{self.desc}: " if self.desc else ""
+
+        # Percentage and Counts
+        percentage_s = "?%"
+        n_fmt = str(current_n)
+        total_fmt = str(current_total) if current_total is not None else "?"
+        if current_total is not None and current_total > 0:
+            percentage = (current_n / current_total) * 100
+            percentage_s = f"{percentage:3.0f}%"
+        elif current_total == 0 and current_n == 0:
+            percentage = 100.0 # Handle 0/0 case as 100% complete
+            percentage_s = "100%"
+        elif current_total == 0:
+             percentage = 100.0 # If total is 0 but n > 0 (?), consider 100%? Or error?
+             percentage_s = "??%"
+
+        # Rate
+        rate = 0.0
+        if self.elapsed > 0:
+            rate = current_n / self.elapsed
+        rate_fmt = f"{rate:.2f}" if rate > 0.01 else "? "
+
+        # Time
+        elapsed_str = self._format_time(self.elapsed)
+        eta_seconds = self._estimate_eta()
+        remaining_str = self._format_time(eta_seconds)
+
+        # Prepare left/right parts for bar_format
+        l_bar = f"{desc}{percentage_s}"
+        r_bar = f"| {n_fmt}/{total_fmt} [{elapsed_str}<{remaining_str}, {rate_fmt}{self.unit}]"
+
+        # Calculate available width for the bar itself
+        terminal_width = self._get_terminal_width()
+        # Adjust for position if implemented fully (basic support here just prints)
+        prefix_len = len(strip_ansi(l_bar))
+        suffix_len = len(strip_ansi(r_bar))
+        # Leave space for '| ' between bar and r_bar
+        bar_width = terminal_width - prefix_len - suffix_len - 2 # -2 for "| "
+        bar_width = max(1, bar_width) # Ensure bar is at least 1 char wide
+
+        # --- Generate the actual progress bar string ---
+        bar = ""
+        if current_total is not None and current_total > 0:
+            filled_len_exact = (current_n / current_total) * bar_width
+            filled_len = int(filled_len_exact)
+            remaining_len = bar_width - filled_len
+
+            if self.bar_style == 'blocks':
+                blocks_filled = self.progress_char * filled_len
+                partial_block_idx = int((filled_len_exact - filled_len) * len(self._block_chars))
+                partial_block = self._block_chars[partial_block_idx] if partial_block_idx > 0 else ""
+                # Adjust remaining len if partial block is used
+                actual_remaining_len = bar_width - len(blocks_filled) - (1 if partial_block else 0)
+                actual_remaining_len = max(0, actual_remaining_len)
+                empty_fill = self.empty_char * actual_remaining_len
+                bar = f"{blocks_filled}{partial_block}{empty_fill}"
+
+            else: # Default 'fill' style
+                 bar = self.progress_char * filled_len + self.empty_char * remaining_len
+        elif current_total == 0 and current_n == 0:
+             bar = self.progress_char * bar_width # 100% filled for 0/0
+        else: # No total, show indeterminate or just empty? Tqdm shows empty
+             bar = self.empty_char * bar_width
+
+        # Apply color/style to the bar components (example: color the filled part)
+        # More complex styling (e.g., gradient) could be added here.
+        bar_styled = f"{self.color}{self.style}{self.background}{bar}{ASCIIColors.color_reset}"
+
+        # Construct final output string using bar_format placeholders
+        full_bar_str = self.bar_format.format(
+            l_bar=l_bar,
+            r_bar=r_bar,
+            bar=bar_styled, # Use the styled bar
+            n=current_n, n_fmt=n_fmt,
+            total=current_total, total_fmt=total_fmt,
+            percentage=percentage_s.strip(), # Remove padding for format use
+            elapsed=elapsed_str, remaining=remaining_str,
+            rate=rate, rate_fmt=rate_fmt,
+            unit=self.unit,
+            desc=self.desc
+        ).strip()
+
+        # Truncate if exceedsncols (shouldn't happen often with calculation above)
+        if len(strip_ansi(full_bar_str)) > terminal_width:
+            # Basic truncation (might cut mid-escape code, less ideal)
+            # A more robust truncate would need ANSI code awareness.
+            # For now, truncate based on visible length roughly.
+            cutoff = terminal_width - 3 # Room for "..."
+            # This simple slice isn't ANSI-aware, but might be okay for overflow
+            full_bar_str = full_bar_str[:cutoff] + "..."
+
+
+        # --- Direct Print using ASCIIColors ---
+        # Use '\r' to return to the beginning of the line
+        prefix = "\r"
+        # Note: Position handling is basic. Real multi-bar requires cursor manipulation.
+        # If position > 0, we'd need ANSI codes to move cursor up, print, move down.
+        # This implementation just prints on the current line.
+
+        # Check if file is valid before printing
+        if self.file and hasattr(self.file, 'write') and not getattr(self.file, 'closed', False):
+            try:
+                # Use ASCIIColors.print to handle the final reset code implicitly
+                # We provide an empty color/style here because the bar itself contains codes
+                ASCIIColors.print(
+                    f"{prefix}{full_bar_str}",
+                    color="", style="", background="", # Bar string already has codes+reset
+                    end="", # No newline
+                    flush=True,
+                    file=self.file
+                )
+            except Exception:
+                 # Handle potential write errors (e.g., closed pipe)
+                 self.close() # Attempt to close the bar if writing fails
+
+
+
 # ==============================================================================
 # --- Logging Compatibility Layer ---
 # ==============================================================================
@@ -2756,6 +3135,50 @@ if __name__ == "__main__":
     else:
         print(f"Log file '{log_file_compat}' not found.")
 
+
+    # --- ProgressBar Demo ---
+    print("\n--- ProgressBar Demo ---")
+    items = range(150)
+
+    # Basic iterable usage
+    print("Basic ProgressBar:")
+    for item in ProgressBar(items, desc="Basic Loop"):
+        time.sleep(0.01)
+
+    # Different style and chars
+    print("\nStyled ProgressBar ('blocks'):")
+    for item in ProgressBar(
+        range(80),
+        desc="Styled",
+        color=ASCIIColors.color_bright_yellow,
+        style=ASCIIColors.style_bold,
+        progress_char="#",
+        empty_char=".",
+        bar_style="blocks"
+    ):
+        time.sleep(0.02)
+
+    # Manual control with context manager
+    print("\nManual ProgressBar:")
+    total_tasks = 120
+    with ProgressBar(total=total_tasks, desc="Manual", unit=" Task", color=ASCIIColors.color_magenta) as pbar:
+        for i in range(total_tasks):
+            time.sleep(0.015)
+            pbar.update(1)
+            if i == total_tasks // 3:
+                pbar.set_description("Stage 2")
+            if i == 2 * total_tasks // 3:
+                pbar.set_description("Final Stage")
+
+    # Example with no total (indeterminate)
+    print("\nIndeterminate ProgressBar (Requires manual updates):")
+    try:
+        with ProgressBar(desc="Waiting...", unit=" checks", color=ASCIIColors.color_cyan) as pbar:
+            for i in range(5): # Simulate fixed number of updates
+                time.sleep(0.5)
+                pbar.update(1)
+    except Exception as e:
+        ASCIIColors.error(f"Error in indeterminate bar: {e}")
 
     # --- Animation Demo ---
     print("\n--- Animation Demo ---")

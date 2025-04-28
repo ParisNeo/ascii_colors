@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.9.0] - 2025-24-27
+
+### Added
+*   **`ProgressBar`:** Introduced a thread-safe, customizable progress bar utility (`ascii_colors.ProgressBar`) mimicking the `tqdm` interface (iterable wrapping, context manager). Supports ANSI colors, styles, and different bar formats using direct terminal printing.
+*   Added `shutil` usage for terminal size detection in `ProgressBar`.
+
+### Changed
+*   Updated main module docstring and README to include `ProgressBar`.
+*   Added `ProgressBar` demonstration to the `if __name__ == "__main__":` block in `__init__.py`.
+*   Expanded type hints in `__init__.py` for `ProgressBar`.
+
 ## [0.8.1] - 2025-04-25
 
 ### Changed

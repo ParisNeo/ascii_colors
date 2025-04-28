@@ -31,6 +31,7 @@ try:
     from ascii_colors import (
         ASCIIColors, LogLevel, Formatter, JSONFormatter,
         Handler, ConsoleHandler, FileHandler, RotatingFileHandler,
+        ProgressBar,
         get_trace_exception, trace_exception
     )
     # Import compatibility layer components
@@ -682,6 +683,146 @@ class TestASCIIColors(unittest.TestCase):
         output_after_force = strip_ansi(self._get_stream_value(stream_ascii))
         self.assertNotIn("After basicConfig (force)", output_after_force)
 
+class TestProgressBar(unittest.TestCase):
+
+    def setUp(self):
+        # Mock print and time/terminal size for controlled testing
+        patcher_print = patch("ascii_colors.ASCIIColors.print")
+        self.mock_ascii_print = patcher_print.start()
+        self.addCleanup(patcher_print.stop)
+
+        patcher_time = patch("time.time")
+        self.mock_time = patcher_time.start()
+        self.mock_time.return_value = 1000.0 # Start time
+        self.addCleanup(patcher_time.stop)
+
+        patcher_sleep = patch("time.sleep") # Mock sleep to speed up tests
+        self.mock_sleep = patcher_sleep.start()
+        self.addCleanup(patcher_sleep.stop)
+
+        patcher_tsize = patch("shutil.get_terminal_size")
+        self.mock_tsize = patcher_tsize.start()
+        self.mock_tsize.return_value = os.terminal_size((80, 24)) # Default size
+        self.addCleanup(patcher_tsize.stop)
+
+        # Use StringIO to capture potential direct prints if needed, though mocking is better
+        self.capture_stream = io.StringIO()
+        self.addCleanup(self.capture_stream.close)
+        self.original_stdout = sys.stdout # Keep original reference if needed
+
+    def _advance_time(self, seconds):
+        self.mock_time.return_value += seconds
+
+    def _get_last_print_args(self):
+        if not self.mock_ascii_print.called:
+            return None
+        # Get the arguments of the last call to ASCIIColors.print
+        # Expected call: print(text, color="", style="", background="", end="", flush=True, file=sys.stdout)
+        last_call_args, last_call_kwargs = self.mock_ascii_print.call_args
+        return last_call_args[0] # Return the main text argument
+
+    def test_iterable_wrapper(self):
+        """Test ProgressBar wrapping an iterable."""
+        data = list(range(5))
+        start_time = self.mock_time.return_value
+
+        # Make __len__ work for the list
+        with patch.object(list, '__len__', return_value=len(data)):
+             pbar = ProgressBar(data, desc="Iter Test", mininterval=0) # No throttle
+
+             # Initial print
+             list(pbar) # Consume the iterator
+
+        # Check calls to print
+        # Should be called len(data) + 1 (initial) + 1 (final) times if mininterval=0
+        self.assertEqual(self.mock_ascii_print.call_count, len(data) + 2)
+
+        # Check final rendered output (last call before newline)
+        # Need to simulate time advancing
+        # This requires more detailed mocking/checking of each render call
+
+        # Simplified check: Look at the last rendered bar content
+        final_render_text = self._get_last_print_args()
+        self.assertIn("\rIter Test: 100%", final_render_text)
+        self.assertIn("| 5/5 [", final_render_text) # Check counts
+
+    def test_context_manager(self):
+        """Test ProgressBar as a context manager."""
+        total = 10
+        start_time = self.mock_time.return_value
+
+        with ProgressBar(total=total, desc="Ctx Test", mininterval=0) as pbar:
+            # Initial render
+            self.mock_ascii_print.assert_called_once()
+            initial_text = self._get_last_print_args()
+            self.assertIn("\rCtx Test:   0%", initial_text)
+            self.assertIn("| 0/10 [", initial_text)
+
+            self.mock_ascii_print.reset_mock()
+            for i in range(total):
+                self._advance_time(0.01) # Simulate work time
+                pbar.update(1)
+
+        # Check updates and final render
+        self.assertEqual(self.mock_ascii_print.call_count, total + 1) # +1 for final render in close()
+        final_text = self._get_last_print_args()
+        self.assertIn("\rCtx Test: 100%", final_text)
+        self.assertIn(f"| {total}/{total} [", final_text)
+
+    def test_styling_options(self):
+        """Test different styling parameters."""
+        with ProgressBar(total=10, desc="Style", color=ASCIIColors.color_red, style=ASCIIColors.style_bold, progress_char=">", empty_char="-", bar_style="fill", mininterval=0) as pbar:
+            pbar.update(5)
+
+        render_text = self._get_last_print_args()
+        # Check bar characters and presence of color/style codes
+        self.assertTrue(ASCIIColors.color_red in render_text)
+        self.assertTrue(ASCIIColors.style_bold in render_text)
+        # Regex to find the bar part approximately: look for > and - between | and |
+        bar_match = re.search(r"\|([^|]+)\|", strip_ansi(render_text))
+        self.assertTrue(bar_match, f"Bar content not found in '{strip_ansi(render_text)}'")
+        bar_content = bar_match.group(1).strip()
+        # Expect something like >>>>>-----
+        self.assertTrue(bar_content.startswith(">"*2), f"Bar content mismatch: {bar_content}") # Adjust multiplier based on width calculation
+        self.assertTrue(bar_content.endswith("-"*2), f"Bar content mismatch: {bar_content}")
+
+    def test_thread_safety(self):
+        """Simulate concurrent updates to test locking (basic check)."""
+        total = 100
+        num_threads = 4
+        updates_per_thread = total // num_threads
+
+        results = []
+        exceptions = []
+
+        pbar = ProgressBar(total=total, desc="Thread Test", mininterval=0.01)
+
+        def worker(start_index):
+            try:
+                for i in range(updates_per_thread):
+                    # No sleep needed, just call update quickly
+                    pbar.update(1)
+                    # time.sleep(0.001) # Optional tiny sleep
+                results.append(True)
+            except Exception as e:
+                exceptions.append(e)
+
+        threads = []
+        for i in range(num_threads):
+            t = threading.Thread(target=worker, args=(i * updates_per_thread,))
+            threads.append(t)
+            t.start()
+
+        for t in threads:
+            t.join()
+
+        pbar.close()
+
+        # Basic assertions: No exceptions and final count is correct
+        self.assertEqual(len(exceptions), 0, f"Exceptions occurred in threads: {exceptions}")
+        self.assertEqual(pbar.n, total, f"Final progress count mismatch. Expected {total}, got {pbar.n}")
+        # Check print was called multiple times (difficult to assert exact number due to throttling)
+        self.assertGreater(self.mock_ascii_print.call_count, num_threads)
 
 if __name__ == "__main__":
     unittest.main()
