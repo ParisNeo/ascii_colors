@@ -13,7 +13,7 @@
 
 **ASCIIColors** is your unified toolkit for creating modern, engaging, and informative Python terminal applications. Forget bland `print()` statements and complex logging setups. Embrace vibrant colors, structured logging, sleek progress bars, interactive menus, and helpful utilities – all from a single, elegant library.
 
-![](assets/ascii_progress.gif)
+![](assets/ascii_menu.gif)
 
 ![](assets/ascii_progress_animation.gif)
 
