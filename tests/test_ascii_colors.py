@@ -23,6 +23,8 @@ from contextlib import redirect_stdout
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch, ANY
+from threading import Lock
+import threading # Needed for ProgressBar tests
 
 # Ensure the module path is correct for testing
 try:
@@ -31,7 +33,7 @@ try:
     from ascii_colors import (
         ASCIIColors, LogLevel, Formatter, JSONFormatter,
         Handler, ConsoleHandler, FileHandler, RotatingFileHandler,
-        ProgressBar,
+        ProgressBar, Menu, MenuItem,
         get_trace_exception, trace_exception
     )
     # Import compatibility layer components
@@ -823,6 +825,219 @@ class TestProgressBar(unittest.TestCase):
         self.assertEqual(pbar.n, total, f"Final progress count mismatch. Expected {total}, got {pbar.n}")
         # Check print was called multiple times (difficult to assert exact number due to throttling)
         self.assertGreater(self.mock_ascii_print.call_count, num_threads)
+
+
+# Updated TestMenu class
+class TestMenu(unittest.TestCase):
+
+    def setUp(self):
+        patcher_print = patch("ascii_colors.ASCIIColors.print")
+        self.mock_ascii_print = patcher_print.start()
+        self.addCleanup(patcher_print.stop)
+
+        # Mock _get_key directly
+        patcher_get_key = patch("ascii_colors._get_key")
+        self.mock_get_key = patcher_get_key.start()
+        self.addCleanup(patcher_get_key.stop)
+
+        patcher_clear = patch("ascii_colors.Menu._clear_screen")
+        self.mock_clear_screen = patcher_clear.start()
+        self.addCleanup(patcher_clear.stop)
+
+        patcher_cursor = patch("ascii_colors.Menu._set_cursor_visibility")
+        self.mock_set_cursor = patcher_cursor.start()
+        self.addCleanup(patcher_cursor.stop)
+
+
+        # Mock action functions
+        self.mock_action_a = Mock()
+        self.mock_action_b = Mock()
+        self.mock_action_fail = Mock(side_effect=ValueError("Mock Fail"))
+
+    def _get_printed_lines(self, strip=True):
+        """Helper to get lines printed via ASCIIColors.print mock."""
+        lines = []
+        # Iterate through calls *before* the last prompt print
+        # prompt_call_index = -1
+        # for i, call in enumerate(reversed(self.mock_ascii_print.call_args_list)):
+        #     args, _ = call
+        #     if args and isinstance(args[0], str) and args[0].strip().startswith("Use ↑/↓"):
+        #         prompt_call_index = len(self.mock_ascii_print.call_args_list) -1 - i
+        #         break
+
+        calls_to_check = self.mock_ascii_print.call_args_list # Check all for now
+        for call in calls_to_check:
+            args, _ = call
+            if args and isinstance(args[0], str):
+                line = args[0]
+                if strip:
+                    line = strip_ansi(line)
+                lines.append(line)
+        return lines
+
+    def _find_last_menu_print_state(self):
+        """Finds the printed lines corresponding to the last full menu render."""
+        # Find the latest title print, then collect lines until the prompt
+        last_title_index = -1
+        calls = self.mock_ascii_print.call_args_list
+        for i, call in enumerate(reversed(calls)):
+            args, _ = call
+            # Simplistic check for title - improve if needed
+            if args and isinstance(args[0], str) and strip_ansi(args[0]).startswith("---"):
+                 # Assume line before was the title
+                 last_title_index = len(calls) - 1 - i -1
+                 break
+
+        if last_title_index == -1: return [] # No menu found
+
+        menu_lines = []
+        for i in range(last_title_index, len(calls)):
+            args, _ = calls[i]
+            if args and isinstance(args[0], str):
+                 line = strip_ansi(args[0])
+                 if line.strip().startswith("Use ↑/↓"): # Stop before prompt
+                     break
+                 menu_lines.append(line)
+        return menu_lines
+
+
+    def test_menu_creation_and_add_items(self):
+        """Test creating a menu and adding actions/submenus (no keys now)."""
+        m = Menu("Test Menu")
+        sub = Menu("Sub")
+        m.add_action("Action A", self.mock_action_a)
+        m.add_submenu("Go Sub", sub)
+
+        self.assertEqual(m.title, "Test Menu")
+        self.assertEqual(len(m.items), 2)
+        self.assertEqual(m.items[0].text, "Action A")
+        self.assertEqual(m.items[0].type, 'action')
+        self.assertEqual(m.items[1].text, "Go Sub")
+        self.assertEqual(m.items[1].type, 'submenu')
+        self.assertIs(m.items[1].target, sub)
+        self.assertIs(sub.parent, m)
+
+    def test_menu_run_display_highlight(self):
+        """Test the display output and highlighting."""
+        m = Menu("Display Test", clear_screen_on_run=False)
+        m.add_action("Item One", lambda: None)
+        m.add_action("Item Two", lambda: None)
+
+        # Simulate keys: Down, then Quit
+        self.mock_get_key.side_effect = ['DOWN', 'QUIT']
+        m.run()
+
+        # Find the last menu state printed
+        last_menu_state = self._find_last_menu_print_state()
+
+        # Check title
+        self.assertTrue(last_menu_state[0].startswith("Display Test"), f"State: {last_menu_state}")
+        self.assertTrue(last_menu_state[1].startswith("------------"))
+        # Check items - Item Two should be selected (index 1)
+        self.assertTrue(last_menu_state[2].startswith(m.prefixes['unselected'] + "Item One")) # Item 0 not selected
+        self.assertTrue(last_menu_state[3].startswith(m.prefixes['selected'] + "Item Two")) # Item 1 selected
+        # Check Quit option
+        self.assertTrue(any("Quit" in line for line in last_menu_state))
+
+    def test_menu_run_select_action_enter(self):
+        """Test selecting an action using Enter."""
+        m = Menu("Action Test", clear_screen_on_run=False)
+        m.add_action("Do A", self.mock_action_a)
+        m.add_action("Do B", self.mock_action_b)
+
+        # Simulate keys: Down (select B), Enter, Enter (confirm), Quit
+        self.mock_get_key.side_effect = ['DOWN', 'ENTER', 'ENTER', 'QUIT']
+        m.run()
+
+        self.mock_action_a.assert_not_called()
+        self.mock_action_b.assert_called_once()
+        # Check for the "Press Enter to continue" prompt print
+        self.assertTrue(any("Press Enter to continue" in strip_ansi(c.args[0])
+                           for c in self.mock_ascii_print.call_args_list if c.args))
+
+    @patch('ascii_colors.trace_exception')
+    def test_menu_run_action_exception_arrows(self, mock_trace):
+        """Test error handling with arrow navigation."""
+        m = Menu("Fail Test", clear_screen_on_run=False)
+        m.add_action("OK Action", self.mock_action_a)
+        m.add_action("Fail Me", self.mock_action_fail)
+
+        # Simulate: Down (select Fail Me), Enter, Enter (confirm), Quit
+        self.mock_get_key.side_effect = ['DOWN', 'ENTER', 'ENTER', 'QUIT']
+        m.run()
+
+        self.mock_action_a.assert_not_called()
+        self.mock_action_fail.assert_called_once()
+        mock_trace.assert_called_once() # Check logging was called
+        self.assertTrue(any("Error executing action:" in strip_ansi(c.args[0])
+                           for c in self.mock_ascii_print.call_args_list if c.args)) # Check error message print
+
+
+    def test_menu_run_submenu_and_back_arrows(self):
+        """Test submenu navigation and Back with arrows."""
+        root = Menu("Root", clear_screen_on_run=False)
+        sub = Menu("Sub", parent=root, clear_screen_on_run=False)
+        sub.add_action("Sub Action A", self.mock_action_a)
+        root.add_action("Root Action B", self.mock_action_b)
+        root.add_submenu("Go Sub", sub) # Added at index 1
+
+        # Sequence:
+        # 1. In Root, Down (select Go Sub), Enter -> Enters Sub
+        # 2. In Sub, Enter (select Sub Action A)
+        # 3. Enter (confirm Sub Action A)
+        # 4. In Sub, Down (select Back), Enter -> Returns to Root
+        # 5. In Root, Quit
+        self.mock_get_key.side_effect = [
+            'DOWN', 'ENTER', # Enter Sub
+            'ENTER', 'ENTER', # Select and confirm Sub Action A
+            'DOWN', 'ENTER', # Select Back in Sub and return
+            'QUIT'           # Quit Root
+        ]
+        root.run()
+
+        self.mock_action_a.assert_called_once() # Sub action called
+        self.mock_action_b.assert_not_called() # Root action not called
+
+
+    def test_menu_ctrl_c_handling(self):
+        """Test Ctrl+C (QUIT signal) handling."""
+        root = Menu("Root", clear_screen_on_run=False)
+        sub = Menu("Sub", parent=root, clear_screen_on_run=False)
+        root.add_submenu("Go Sub", sub)
+
+        # --- Test Ctrl+C in Root (should quit) ---
+        self.mock_get_key.side_effect = ['QUIT']
+        root.run()
+        # Check that the loop exited (no mocks called after QUIT)
+
+        # --- Test Ctrl+C in Sub (should go back) ---
+        self.mock_get_key.reset_mock()
+        # Simulate: Enter (go to sub), then Ctrl+C (go back), then Quit root
+        self.mock_get_key.side_effect = ['ENTER', 'QUIT', 'QUIT']
+        root.run()
+        # Difficult to assert "back" happened cleanly without inspecting print state changes
+
+
+    def test_menu_cursor_visibility(self):
+        """Test cursor hiding/showing option."""
+        # Test hiding enabled
+        m_hide = Menu("Hide Cursor", hide_cursor=True)
+        m_hide.add_action("Action", lambda: None)
+        self.mock_get_key.side_effect = ['QUIT']
+        m_hide.run()
+        # Check hide (False) was called on start, show (True) on exit
+        self.mock_set_cursor.assert_any_call(False)
+        self.mock_set_cursor.assert_called_with(True) # Last call should be True
+
+        self.mock_set_cursor.reset_mock()
+
+        # Test hiding disabled
+        m_show = Menu("Show Cursor", hide_cursor=False)
+        m_show.add_action("Action", lambda: None)
+        self.mock_get_key.side_effect = ['QUIT']
+        m_show.run()
+        # Check set_cursor was NOT called
+        self.mock_set_cursor.assert_not_called()
 
 if __name__ == "__main__":
     unittest.main()

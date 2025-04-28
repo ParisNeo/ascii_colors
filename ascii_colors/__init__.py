@@ -37,7 +37,7 @@ import json
 import logging as std_logging # Alias to avoid name conflicts and access standard levels
 import os
 import shutil
-import string
+import platform
 import sys
 import threading
 import time
@@ -53,8 +53,86 @@ from typing import (Any, Callable, Dict, List, Optional, TextIO, Tuple, Type,
 
 import math
 import re
+import textwrap
+# Platform specific imports for single key press
+import platform
+if platform.system() == "Windows":
+    import msvcrt
+else: # Unix-like (Linux, macOS)
+    import termios
+    import tty
 
 # --- Helper functions ---
+
+# --- Helper for single key input ---
+
+_KEY_MAP_WINDOWS = {
+    b'H': 'UP', b'P': 'DOWN', b'K': 'LEFT', b'M': 'RIGHT', # Arrows
+    b'\r': 'ENTER',
+    b'\x03': 'QUIT', # Ctrl+C
+    b'\x08': 'BACKSPACE',
+    # Add other special keys if needed (e.g., Home, End, Del)
+}
+_KEY_MAP_UNIX_ESCAPE = {
+    'A': 'UP', 'B': 'DOWN', 'D': 'LEFT', 'C': 'RIGHT', # Arrows
+    # Add Home (H), End (F) etc. if needed: '[1~', '[4~' or 'OH', 'OF'
+}
+
+def _get_key() -> str:
+    """
+    Reads a single keypress from the terminal without waiting for Enter.
+    Handles basic arrow keys, Enter, and Ctrl+C across platforms.
+
+    Returns:
+        A string representing the key ('UP', 'DOWN', 'LEFT', 'RIGHT', 'ENTER', 'QUIT', 'BACKSPACE')
+        or the character pressed.
+    """
+    if platform.system() == "Windows":
+        ch = msvcrt.getch()
+        # Check for special keys (starting with \xe0 or \x00)
+        if ch in (b'\xe0', b'\x00'):
+            ch2 = msvcrt.getch()
+            return _KEY_MAP_WINDOWS.get(ch2, '') # Return mapped key or empty string
+        # Check for other single-byte special keys
+        mapped = _KEY_MAP_WINDOWS.get(ch)
+        if mapped:
+            return mapped
+        # Regular character
+        try:
+            return ch.decode('utf-8')
+        except UnicodeDecodeError:
+            return '?' # Or handle decoding errors more robustly
+
+    else: # Unix-like
+        fd = sys.stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
+        try:
+            tty.setcbreak(fd) # Read keys immediately, pass signals (like Ctrl+C)
+            # tty.setraw(fd) # More raw, might disable Ctrl+C handling by terminal
+
+            ch = sys.stdin.read(1)
+
+            if ch == '\x1b': # Escape sequence likely
+                # Read up to 2 more chars for common sequences (like \x1b[A)
+                next_chars = sys.stdin.read(2)
+                if next_chars.startswith('['):
+                    key = next_chars[1]
+                    return _KEY_MAP_UNIX_ESCAPE.get(key, '') # Map arrow keys
+                # Could handle other escape sequences here (e.g., Alt+key)
+                return 'ESCAPE' # Or return raw escape if needed
+
+            elif ch == '\r' or ch == '\n':
+                return 'ENTER'
+            elif ch == '\x03': # Ctrl+C
+                return 'QUIT'
+            elif ch == '\x7f': # Often Backspace
+                return 'BACKSPACE'
+            else:
+                return ch # Regular character
+
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
 
 # Regular expression to match ANSI escape sequences.
 # \x1B is the ESC character.
@@ -114,6 +192,7 @@ NOTSET: int = LogLevel.NOTSET.value
 initialized with this level."""
 
 # --- Type Aliases ---
+ActionCallable = Callable[[], Any] # Type alias for menu action functions
 
 ExcInfoType = Optional[Union[bool, BaseException, Tuple[Optional[Type[BaseException]], Optional[BaseException], Any]]]
 """
@@ -2247,6 +2326,273 @@ def trace_exception(ex: BaseException) -> None:
     # Uses the logging system, not direct print
     ASCIIColors.error(f"Exception Traceback ({type(ex).__name__})", exc_info=ex)
 
+# ==============================
+# --- Menu System Classes ---
+# ==============================
+
+class MenuItem:
+    """Internal representation of an item within a Menu (unchanged)."""
+    def __init__(
+        self,
+        text: str,
+        item_type: str, # 'action', 'submenu', 'back', 'quit'
+        target: Union[ActionCallable, 'Menu', None], # Target can be None for back/quit
+    ):
+        self.text = text
+        self.type = item_type
+        self.target = target
+        # self.key removed as we use arrow navigation
+
+class Menu:
+    """
+    Builds and runs interactive, styled command-line menus with arrow-key navigation.
+
+    Leverages ASCIIColors for styling and provides an easy way to define
+    actions and navigate submenus using Up/Down arrows and Enter.
+
+    Example:
+        >>> main_menu = Menu("Welcome!")
+        >>> sub_menu = Menu("Options", parent=main_menu)
+        >>> def say_hello(): ASCIIColors.green("Hello there!")
+        >>> main_menu.add_action("Say Hello", say_hello)
+        >>> main_menu.add_submenu("Go to Options", sub_menu)
+        >>> sub_menu.add_action("Option 1", lambda: print("Ran option 1"))
+        >>> main_menu.run() # Start the interactive menu
+    """
+    def __init__(
+        self,
+        title: str,
+        parent: Optional['Menu'] = None,
+        clear_screen_on_run: bool = True,
+        prompt_text: str = "Use ↑/↓ arrows, Enter to select.", # Updated prompt
+        invalid_choice_text: str = "Invalid key.", # Should not happen with arrow keys
+        title_color: str = ASCIIColors.color_bright_yellow,
+        title_style: str = ASCIIColors.style_bold,
+        item_color: str = ASCIIColors.color_cyan,
+        item_style: str = "",
+        selected_color: str = ASCIIColors.color_black, # Text color when selected
+        selected_background: str = ASCIIColors.color_bg_cyan, # BG color when selected
+        selected_style: str = "",
+        selected_prefix: str = "> ",
+        unselected_prefix: str = "  ",
+        prompt_color: str = ASCIIColors.color_green,
+        error_color: str = ASCIIColors.color_red,
+        hide_cursor: bool = True, # Option to hide cursor during menu interaction
+        file: StreamType = sys.stdout, # Where to print the menu
+    ):
+        """
+        Initializes a new Menu instance.
+
+        Args:
+            title: The text displayed as the menu title.
+            parent: Optional reference to the parent menu (for 'Back' navigation).
+            clear_screen_on_run: If True, clears the terminal before showing the menu.
+            prompt_text: Informational text displayed below the menu.
+            invalid_choice_text: Message shown for invalid input (less likely now).
+            title_color: ANSI color code for the title.
+            title_style: ANSI style code for the title.
+            item_color: ANSI color code for non-selected menu item text.
+            item_style: ANSI style code for non-selected menu item text.
+            selected_color: ANSI color code for selected menu item text.
+            selected_background: ANSI background color for selected menu item.
+            selected_style: ANSI style code for selected menu item.
+            selected_prefix: String prefix for the selected item (e.g., '> ').
+            unselected_prefix: String prefix for non-selected items (e.g., '  ').
+            prompt_color: ANSI color code for the prompt text.
+            error_color: ANSI color code for error messages.
+            hide_cursor: If True, attempts to hide the terminal cursor while the menu is active.
+            file: The stream to print the menu output to (default: sys.stdout).
+        """
+        self.title = title
+        self.parent = parent
+        self.items: List[MenuItem] = []
+        self.clear_screen_on_run = clear_screen_on_run
+        self.prompt_text = prompt_text
+        self.invalid_choice_text = invalid_choice_text # Kept for consistency
+        self.file = file
+        self.hide_cursor = hide_cursor
+
+        # Store styling options
+        self.styles = {
+            "title": title_style + title_color,
+            "item": item_style + item_color,
+            "selected": selected_style + selected_color + selected_background,
+            "prompt": prompt_color,
+            "error": error_color,
+        }
+        self.prefixes = {
+            "selected": selected_prefix,
+            "unselected": unselected_prefix,
+        }
+
+    def add_action(self, text: str, action: ActionCallable) -> 'Menu':
+        """
+        Adds an action item to the menu. Selecting this item calls the `action` function.
+
+        Args:
+            text: The text displayed for this menu item.
+            action: The function (callable with no arguments) to execute when selected.
+
+        Returns:
+            The Menu instance (self) for chaining.
+        """
+        self.items.append(MenuItem(text, 'action', action))
+        return self
+
+    def add_submenu(self, text: str, submenu: 'Menu') -> 'Menu':
+        """
+        Adds a submenu item to the menu. Selecting this item runs the `submenu`.
+
+        Args:
+            text: The text displayed for this menu item.
+            submenu: The Menu instance to run when this item is selected.
+                     Its `parent` will be automatically set to this menu.
+
+        Returns:
+            The Menu instance (self) for chaining.
+        """
+        submenu.parent = self # Set parent for back navigation
+        self.items.append(MenuItem(text, 'submenu', submenu))
+        return self
+
+    def _clear_screen(self) -> None:
+        """Clears the terminal screen."""
+        # Hide cursor before clearing might look slightly better
+        # if self.hide_cursor: self._set_cursor_visibility(False)
+        command = 'cls' if platform.system().lower() == "windows" else 'clear'
+        os.system(command)
+
+    def _set_cursor_visibility(self, visible: bool):
+        """Show or hide the terminal cursor using ANSI codes."""
+        if self.file == sys.stdout: # Only modify cursor for stdout
+            code = "\x1b[?25h" if visible else "\x1b[?25l"
+            try:
+                print(code, end="", flush=True, file=self.file)
+            except Exception:
+                # Ignore errors if stream is not a compatible terminal
+                pass
+
+    def _display_menu(self, current_selection: int, all_options: List[MenuItem]):
+        """Internal method to draw the menu with the current selection highlighted."""
+        if self.clear_screen_on_run:
+            self._clear_screen()
+        else:
+            # If not clearing, attempt to move cursor up to overwrite previous menu
+            # This requires knowing how many lines the previous menu took.
+            # Simpler approach for now: just print without clearing.
+            pass # Maybe add ANSI code to move cursor up N lines later?
+
+        # Display Title
+        ASCIIColors.print(self.title, color=self.styles['title'], style="", file=self.file)
+        ASCIIColors.print("-" * len(strip_ansi(self.title)), color=self.styles['title'], style="", file=self.file)
+
+        # Display Items
+        for i, item in enumerate(all_options):
+            if i == current_selection:
+                prefix = self.prefixes['selected']
+                style_and_color = self.styles['selected']
+            else:
+                prefix = self.prefixes['unselected']
+                style_and_color = self.styles['item']
+
+            # Print styled item line
+            line = f"{prefix}{item.text}"
+            # Apply style, print, then reset
+            ASCIIColors.print(f"{style_and_color}{line}{ASCIIColors.color_reset}", file=self.file)
+
+        # Display Prompt
+        ASCIIColors.print(f"\n{self.prompt_text}", color=self.styles['prompt'], style="", file=self.file)
+
+
+    def run(self) -> None:
+        """
+        Displays the menu, handles arrow key navigation, and executes selections.
+
+        The loop continues until the user selects "Quit" or "Back".
+        Uses Up/Down arrows for navigation and Enter for selection.
+        """
+        current_selection = 0
+        if self.hide_cursor:
+            self._set_cursor_visibility(False)
+
+        try:
+            while True:
+                # Combine main items with Back/Quit options for navigation
+                all_options = list(self.items) # Copy main items
+                if self.parent:
+                    all_options.append(MenuItem("Back", "back", None))
+                else:
+                    all_options.append(MenuItem("Quit", "quit", None))
+
+                num_options = len(all_options)
+                if num_options == 0:
+                    ASCIIColors.print("Menu is empty.", color=self.styles['error'], file=self.file)
+                    return # Nothing to select
+
+                # Ensure selection index is valid (can happen if items change dynamically - not supported yet)
+                current_selection = max(0, min(current_selection, num_options - 1))
+
+                self._display_menu(current_selection, all_options)
+
+                # --- Get User Input ---
+                key = _get_key()
+
+                # --- Process Input ---
+                if key == 'UP':
+                    current_selection = (current_selection - 1 + num_options) % num_options
+                elif key == 'DOWN':
+                    current_selection = (current_selection + 1) % num_options
+                elif key == 'ENTER':
+                    selected_item = all_options[current_selection]
+
+                    # --- Handle Selection ---
+                    if selected_item.type == 'action':
+                        if self.clear_screen_on_run: self._clear_screen() # Clear before action output
+                        try:
+                            # Show cursor during action execution if needed
+                            if self.hide_cursor: self._set_cursor_visibility(True)
+                            selected_item.target() # Call the action function
+                            # Hide cursor again before asking for confirmation
+                            if self.hide_cursor: self._set_cursor_visibility(False)
+
+                            ASCIIColors.print("\nPress Enter to continue...", color=self.styles['prompt'], end="", flush=True, file=self.file)
+                            while _get_key() != 'ENTER': pass # Wait specifically for Enter
+                        except Exception as e:
+                            # Show cursor if error occurred
+                            if self.hide_cursor: self._set_cursor_visibility(True)
+                            ASCIIColors.error("Error executing action:", file=self.file)
+                            trace_exception(e) # Log the exception
+                            # Hide cursor again before confirmation
+                            if self.hide_cursor: self._set_cursor_visibility(False)
+                            ASCIIColors.print("\nPress Enter to continue...", color=self.styles['prompt'], end="", flush=True, file=self.file)
+                            while _get_key() != 'ENTER': pass # Wait for Enter
+                    elif selected_item.type == 'submenu':
+                        # Show cursor before running submenu
+                        # if self.hide_cursor: self._set_cursor_visibility(True)
+                        selected_item.target.run() # Run the submenu
+                        # Hide cursor again when returning (if needed)
+                        # if self.hide_cursor: self._set_cursor_visibility(False)
+                    elif selected_item.type == 'back':
+                        return # Exit this menu's run loop
+                    elif selected_item.type == 'quit':
+                        break # Exit the main loop (only for root menu)
+
+                elif key == 'QUIT': # Handle Ctrl+C
+                     if self.parent:
+                         return # Treat as 'Back' in submenus
+                     else:
+                         ASCIIColors.print("\nQuitting.", color=self.styles['prompt'], file=self.file)
+                         break # Quit from root menu
+
+                # Ignore other keys for now
+
+        finally:
+            # --- Ensure cursor is visible on exit ---
+            if self.hide_cursor:
+                self._set_cursor_visibility(True)
+            # Optionally clear screen on final exit?
+            # if self.clear_screen_on_run: self._clear_screen()
+
 
 # --- TQDM-like ProgressBar ---
 
@@ -3217,6 +3563,72 @@ if __name__ == "__main__":
         trace_exception(e)
 
 
+    # --- Menu Demo ---
+    print("\n--- Menu Demo (Arrow Key Navigation) ---")
+    ASCIIColors.print("Note: Menu Demo requires interactive terminal with arrow key support.", color=ASCIIColors.color_yellow)
+
+    # Define some action functions (same as before)
+    def action_hello():
+        ASCIIColors.success("Hello from the menu action!")
+
+    def action_info():
+        ASCIIColors.info("Displaying some info...")
+        print("System Platform:", platform.system())
+        print("Python Version:", sys.version.split()[0])
+
+    def action_fail():
+        ASCIIColors.warning("This action is designed to fail.")
+        raise RuntimeError("Simulated action failure")
+
+    # Create menus
+    root_menu = Menu(
+        title="Main Application Menu (Arrows + Enter)",
+        title_color=ASCIIColors.color_bright_cyan,
+        item_color=ASCIIColors.color_white,
+        selected_background=ASCIIColors.color_bg_blue,
+        selected_prefix="➔ ", # Use arrow prefix
+        unselected_prefix="  ",
+        prompt_text="Use ↑/↓ arrows, Enter to select. Ctrl+C to Quit/Back."
+    )
+
+    settings_menu = Menu(
+        title="Settings Submenu",
+        parent=root_menu, # Important for Back option
+        title_color=ASCIIColors.color_yellow,
+        item_color=ASCIIColors.color_green,
+        selected_background=ASCIIColors.color_bg_magenta,
+    )
+
+    more_menu = Menu(
+        title="More Options",
+        parent=settings_menu, # Nested submenu
+        item_color=ASCIIColors.color_magenta,
+        selected_background=ASCIIColors.color_bg_bright_black,
+    )
+
+    # Add items to root menu (no keys needed)
+    root_menu.add_action("Say Hello", action_hello)
+    root_menu.add_action("Show System Info", action_info)
+    root_menu.add_submenu("Open Settings", settings_menu)
+    root_menu.add_action("Test Failing Action", action_fail)
+
+    # Add items to settings menu
+    settings_menu.add_action("Adjust Brightness (Placeholder)", lambda: print("Brightness adjusted!"))
+    settings_menu.add_action("Toggle Sound (Placeholder)", lambda: print("Sound toggled!"))
+    settings_menu.add_submenu("More Settings...", more_menu)
+
+    # Add items to the nested menu
+    more_menu.add_action("Reset Configuration (Placeholder)", lambda: print("Config reset!"))
+    more_menu.add_action("Check for Updates (Placeholder)", lambda: print("Checking..."))
+
+    # Run the main menu (requires interactive terminal)
+    ASCIIColors.print("\nStarting interactive menu demo...\n", color=ASCIIColors.color_yellow)
+    # In a non-interactive test environment, this would hang or fail.
+    # Uncomment the next line to run interactively:
+    root_menu.run()
+    ASCIIColors.print("\nMenu demo finished or quit.", color=ASCIIColors.color_yellow)
+
+    
     # --- Cleanup Demo Files ---
     print("\n--- Cleanup ---")
     # Explicitly call shutdown BEFORE attempting to delete files in the demo,
