@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 *   Added tests for `confirm` and `prompt` methods.
 *   Added documentation for `confirm` and `prompt` to README, usage guide, and API reference.
 
+### Changed
+* Now `add_action` can also receive an optional `item_color` to set the item color in the menu.
+
 ## [0.10.0] - 2025-04-28
 
 ### Added

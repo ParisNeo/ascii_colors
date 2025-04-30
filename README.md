@@ -644,6 +644,7 @@ Easily get confirmations or text input from the user directly in the terminal. T
 *   **`ASCIIColors.prompt(prompt_text, color=..., style=..., ...)`**: Displays a styled prompt and reads a line of text.
     *   Returns the user's input string.
     *   Returns an empty string if cancelled with Ctrl+C.
+    *   If hide_input=True, don't show the input text (useful for passwords and keys).
 
 ```python
 from ascii_colors import ASCIIColors
@@ -662,7 +663,8 @@ proceed = ASCIIColors.confirm("Continue with installation?", default_yes=True)
 api_key = ASCIIColors.prompt(
     "Enter your API key: ",
     color=ASCIIColors.color_cyan,
-    style=ASCIIColors.style_bold
+    style=ASCIIColors.style_bold,
+    hide_input=True
 )
 if api_key:
     print("API Key received.")
