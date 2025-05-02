@@ -2438,320 +2438,678 @@ def trace_exception(ex: BaseException) -> None:
     """
     # Uses the logging system, not direct print
     ASCIIColors.error(f"Exception Traceback ({type(ex).__name__})", exc_info=ex)
+
+
 # ==============================
-# --- Menu System Classes ---
+# --- Menu System Classes (REVISED and CORRECTED) ---
 # ==============================
 
 class MenuItem:
-    """Internal representation of an item within a Menu."""
+    """Represents an item within a Menu, extended for various interaction types."""
+
     def __init__(
         self,
         text: str,
-        item_type: str,  # 'action', 'submenu', 'back', 'quit'
-        target: Union[ActionCallable, 'Menu', None], # Target can be None for back/quit
-        custom_color: Optional[str] = None,  # Optional custom color for this item
+        item_type: str = 'action',  # 'action', 'submenu', 'separator', 'back', 'quit', 'confirm_multi'
+        target: Union[Callable[[], Any], 'Menu', None] = None, # Using Callable type hint
+        # --- Behavior Flags & Data ---
+        value: Any = None,               # Data associated with the item (used for return values)
+        disabled: bool = False,          # If True, item cannot be selected
+        selected: bool = False,          # Toggled state (for multi-select mode)
+        exit_on_success: bool = False,   # For actions: exit menu if action returns True/no error
+        is_input: bool = False,          # If True, this item accepts text input
+        initial_input: str = "",         # **CORRECTED**: Initial value for input items (parameter name)
+        help_text: Optional[str] = None, # Additional text shown when item is highlighted
+        # --- Styling ---
+        custom_color: Optional[str] = None, # Custom text color when *not* selected/highlighted
     ):
         """
         Initializes a MenuItem.
 
         Args:
-            text: Text displayed for the item.
-            item_type: Type of the item ('action', 'submenu', 'back', 'quit').
-            target: The function to call (for 'action'), the Menu instance (for 'submenu'), or None.
+            text: Text displayed for the item. Can include placeholders like "{input}" for input items.
+            item_type: Type: 'action', 'submenu', 'separator', 'back', 'quit', 'confirm_multi'.
+            target: Function (for 'action'), Menu instance (for 'submenu'), or None.
+            value: Data associated with the item, returned in selection modes. Defaults to `text`.
+            disabled: If True, the item is shown but cannot be interacted with.
+            selected: Initial selection state (for 'select_multiple' mode).
+            exit_on_success: If True and item_type is 'action', the menu will exit successfully
+                             if the action function returns True or runs without error.
+            is_input: If True, this item becomes an inline text input field.
+            initial_input: The starting text for an input item.
+            help_text: Optional description displayed when the item is highlighted.
             custom_color: Optional specific ANSI color code for this item's text when not selected.
         """
-        self.text = text
-        self.type = item_type
-        self.target = target
+        if item_type == 'separator' and text is None:
+            text = "" # Separators don't strictly need text
+
+        self.text: str = text # Display text (can contain placeholders)
+        self.item_type: str = item_type
+        self.target: Union[Callable[[], Any], 'Menu', None] = target
+        self.value: Any = value if value is not None else text # Default value is the text
+        self.disabled: bool = disabled
+        self.selected: bool = selected
+        self.exit_on_success: bool = exit_on_success
+        self.is_input: bool = is_input
+        self.input_value: str = initial_input # **CORRECTED**: Attribute name is still input_value, assigned from initial_input
+        self.help_text: Optional[str] = help_text
         self.custom_color: Optional[str] = custom_color
+
+        # Basic validation
+        if self.is_input and self.item_type not in ('action', 'submenu'):
+            pass
+        if self.item_type == 'separator':
+            self.disabled = True # Separators are inherently disabled
+
 
 class Menu:
     """
-    Builds and runs interactive, styled command-line menus with arrow-key navigation.
+    Builds and runs interactive, styled command-line menus with various modes.
 
-    Leverages ASCIIColors for styling and provides an easy way to define
-    actions and navigate submenus using Up/Down arrows and Enter. Handles Ctrl+C
-    for quitting or going back.
-
-    Example:
-        >>> main_menu = Menu("Welcome!")
-        >>> sub_menu = Menu("Options", parent=main_menu)
-        >>> def say_hello(): ASCIIColors.green("Hello there!")
-        >>> main_menu.add_action("Say Hello", say_hello)
-        >>> main_menu.add_submenu("Go to Options", sub_menu)
-        >>> main_menu.add_action("Red Action", lambda: print("Special!"), item_color=ASCIIColors.color_red)
-        >>> sub_menu.add_action("Option 1", lambda: print("Ran option 1"))
-        >>> main_menu.run() # Start the interactive menu
+    Supports arrow-key navigation, different selection modes (execute, single, multiple),
+    input fields, filtering, and more, using ASCIIColors for styling.
     """
+    # ... (Keep the __init__ method exactly as it was in the previous good response) ...
     def __init__(
         self,
         title: str,
         parent: Optional['Menu'] = None,
+        mode: str = 'execute', # 'execute', 'select_single', 'select_multiple'
         clear_screen_on_run: bool = True,
-        prompt_text: str = "Use ↑/↓ arrows, Enter to select. Ctrl+C to Quit/Back.",
-        invalid_choice_text: str = "Invalid key.", # Less relevant with arrow keys
+        hide_cursor: bool = True,
+        enable_filtering: bool = False,
+        help_area_height: int = 0, # Number of lines reserved for help text
+        # --- Text Prompts ---
+        prompt_text: str = "Use ↑/↓ arrows, Enter/Space to select/toggle. Ctrl+C to Quit/Back.",
+        filter_prompt: str = "Filter: ",
+        confirm_prompt: str = "\nPress Enter to continue...",
+        invalid_choice_text: str = "Invalid key.",
+        action_error_text: str = "Error executing action:",
+        # --- Styling ---
         title_color: str = ASCIIColors.color_bright_yellow,
         title_style: str = ASCIIColors.style_bold,
-        item_color: str = ASCIIColors.color_cyan, # Default color for non-selected items
+        item_color: str = ASCIIColors.color_cyan,
         item_style: str = "",
-        selected_color: str = ASCIIColors.color_black, # Text color when selected
-        selected_background: str = ASCIIColors.color_bg_cyan, # BG color when selected
+        selected_color: str = ASCIIColors.color_black, # Text color when highlighted
+        selected_background: str = ASCIIColors.color_bg_cyan,
         selected_style: str = "",
-        selected_prefix: str = "> ",
-        unselected_prefix: str = "  ",
+        disabled_color: Optional[str] = ASCIIColors.color_bright_black, # Optional: Dim disabled items
+        disabled_style: str = ASCIIColors.style_dim,
+        separator_style: Optional[str] = ASCIIColors.color_bright_black, # Color/style for separators
         prompt_color: str = ASCIIColors.color_green,
         error_color: str = ASCIIColors.color_red,
-        hide_cursor: bool = True, # Option to hide cursor during menu interaction
-        file: StreamType = sys.stdout, # Where to print the menu
+        filter_color: str = ASCIIColors.color_magenta,
+        help_color: str = ASCIIColors.color_yellow,
+        checkbox_selected: str = "[x]",
+        checkbox_unselected: str = "[ ]",
+        radio_selected: str = "(*)",
+        radio_unselected: str = "( )",
+        selected_prefix: str = "> ",
+        unselected_prefix: str = "  ",
+        input_cursor_color: str = ASCIIColors.color_bg_white, # Background for cursor in input
+        # --- Output ---
+        file: StreamType = sys.stdout,
     ):
-        """
-        Initializes a new Menu instance.
-
-        Args:
-            title: The text displayed as the menu title.
-            parent: Optional reference to the parent menu (for 'Back' navigation).
-            clear_screen_on_run: If True, clears the terminal before showing the menu.
-            prompt_text: Informational text displayed below the menu.
-            invalid_choice_text: Message shown for invalid input (less likely now).
-            title_color: ANSI color code for the title.
-            title_style: ANSI style code for the title.
-            item_color: Default ANSI color code for non-selected menu item text.
-            item_style: ANSI style code for non-selected menu item text.
-            selected_color: ANSI color code for selected menu item text.
-            selected_background: ANSI background color for selected menu item.
-            selected_style: ANSI style code for selected menu item.
-            selected_prefix: String prefix for the selected item (e.g., '> ').
-            unselected_prefix: String prefix for non-selected items (e.g., '  ').
-            prompt_color: ANSI color code for the prompt text.
-            error_color: ANSI color code for error messages.
-            hide_cursor: If True, attempts to hide the terminal cursor while the menu is active.
-            file: The stream to print the menu output to (default: sys.stdout).
-        """
         self.title = title
         self.parent = parent
+        self.mode = mode.lower()
         self.items: List[MenuItem] = []
+        self._original_items: Optional[List[MenuItem]] = None # For resetting filter
         self.clear_screen_on_run = clear_screen_on_run
-        self.prompt_text = prompt_text
-        self.invalid_choice_text = invalid_choice_text # Kept for consistency
-        self.file = file
         self.hide_cursor = hide_cursor
+        self.enable_filtering = enable_filtering
+        self.help_area_height = help_area_height
+        self.file = file
 
-        # Store styling options, separating base style and default color for items
+        self._current_selection_idx: int = 0
+        self._filter_text: str = ""
+        self._is_editing_input: bool = False
+        self._editing_item_idx: Optional[int] = None
+        self._input_cursor_pos: int = 0
+        self._quit_menu: bool = False
+        self._run_result: Any = None
+
+        self.prompts = {
+            "main": prompt_text, "filter": filter_prompt, "confirm": confirm_prompt,
+            "invalid": invalid_choice_text, "error": action_error_text,
+        }
         self.styles = {
-            "title": title_style + title_color,
-            "item_style_only": item_style, # Style without default color
-            "item_color_only": item_color, # Default color without style
-            "item": item_style + item_color, # Combined default style+color
-            "selected": selected_style + selected_color + selected_background,
-            "prompt": prompt_color,
-            "error": error_color,
+            "title": title_style + title_color, "item_default": item_style + item_color,
+            "item_style_only": item_style, "item_color_only": item_color,
+            "selected_highlight": selected_style + selected_color + selected_background,
+            "disabled": (disabled_style + disabled_color) if disabled_color else "",
+            "separator": separator_style if separator_style else "", "prompt": prompt_color,
+            "error": error_color, "filter": filter_color, "help": help_color,
+            "input_cursor": input_cursor_color,
         }
         self.prefixes = {
-            "selected": selected_prefix,
-            "unselected": unselected_prefix,
+            "selected": selected_prefix, "unselected": unselected_prefix,
+            "checkbox_sel": checkbox_selected + " ", "checkbox_unsel": checkbox_unselected + " ",
+            "radio_sel": radio_selected + " ", "radio_unsel": radio_unselected + " ",
         }
 
-    def add_action(self, text: str, action: ActionCallable, item_color: Optional[str] = None) -> 'Menu':
-        """
-        Adds an action item to the menu. Selecting this item calls the `action` function.
+        if self.mode not in ['execute', 'select_single', 'select_multiple']:
+            raise ValueError(f"Invalid menu mode: {self.mode}")
 
-        Args:
-            text: The text displayed for this menu item.
-            action: The function (callable with no arguments) to execute when selected.
-            item_color: Optional specific ANSI color code for this item's text (overrides default).
 
-        Returns:
-            The Menu instance (self) for chaining.
-        """
-        # Ensure action is callable before adding
-        if not callable(action) and action is not None: # Check target validity
+    # --- Methods to Add Items ---
+
+    # ... (Keep add_action, add_submenu, add_choice as they were) ...
+    def add_action(self, text: str, action: Callable[[], Any], *, # Use Callable
+                   value: Any = None, exit_on_success: bool = False,
+                   item_color: Optional[str] = None, help_text: Optional[str] = None,
+                   disabled: bool = False) -> 'Menu':
+        if not callable(action) and action is not None:
              raise TypeError(f"Action target must be callable or None, got {type(action)}")
-        self.items.append(MenuItem(text, 'action', action, custom_color=item_color))
+        self.items.append(MenuItem(
+            text=text, item_type='action', target=action, value=value,
+            exit_on_success=exit_on_success, custom_color=item_color,
+            help_text=help_text, disabled=disabled
+        ))
         return self
 
-    def add_submenu(self, text: str, submenu: 'Menu') -> 'Menu':
-        """
-        Adds a submenu item to the menu. Selecting this item runs the `submenu`.
-
-        Args:
-            text: The text displayed for this menu item.
-            submenu: The Menu instance to run when this item is selected.
-                     Its `parent` will be automatically set to this menu.
-
-        Returns:
-            The Menu instance (self) for chaining.
-        """
-        submenu.parent = self # Set parent for back navigation
-        # Submenus don't get custom color via this method directly
-        self.items.append(MenuItem(text, 'submenu', submenu, custom_color=None))
+    def add_submenu(self, text: str, submenu: 'Menu', *,
+                    value: Any = None, item_color: Optional[str] = None,
+                    help_text: Optional[str] = None, disabled: bool = False) -> 'Menu':
+        if not isinstance(submenu, Menu):
+             raise TypeError(f"Submenu target must be a Menu instance, got {type(submenu)}")
+        submenu.parent = self
+        self.items.append(MenuItem(
+            text=text, item_type='submenu', target=submenu, value=value,
+            custom_color=item_color, help_text=help_text, disabled=disabled
+        ))
         return self
 
+    def add_choice(self, text: str, *, value: Any = None, selected: bool = False,
+                   item_color: Optional[str] = None, help_text: Optional[str] = None,
+                   disabled: bool = False) -> 'Menu':
+        self.items.append(MenuItem(
+            text=text, item_type='action', target=None, # Choices don't have default actions
+            value=value, selected=selected, custom_color=item_color,
+            help_text=help_text, disabled=disabled
+        ))
+        return self
+
+    # **CORRECTED add_input**
+    def add_input(self, text: str, *, initial_value: str = "", placeholder: str = "{input}",
+                  value: Any = None, item_color: Optional[str] = None,
+                  help_text: Optional[str] = None, disabled: bool = False) -> 'Menu':
+        """Adds an inline text input item."""
+        display_text = text.replace(placeholder, "") # Remove placeholder for storage
+        self.items.append(MenuItem(
+            text=display_text, item_type='action', target=None, value=value,
+            is_input=True,
+            initial_input=initial_value, # **Pass the correct keyword argument**
+            # Note: MenuItem.__init__ assigns initial_input to self.input_value internally
+            custom_color=item_color, help_text=help_text, disabled=disabled
+        ))
+        return self
+
+    # ... (Keep add_separator as it was) ...
+    def add_separator(self, text: Optional[str] = None) -> 'Menu':
+        sep_text = text if text is not None else ("-" * 20)
+        self.items.append(MenuItem(text=sep_text, item_type='separator', disabled=True))
+        return self
+
+    # --- Dynamic Updates ---
+    # ... (Keep set_items, refresh_display as they were) ...
+    def set_items(self, new_items: List[MenuItem]):
+        self.items = new_items
+        self._original_items = list(new_items)
+        self._apply_filter()
+        self._current_selection_idx = 0
+
+    def refresh_display(self):
+        pass # Redraw happens in the loop
+
+
+    # --- Internal Helpers ---
+    # ... (Keep _clear_screen, _set_cursor_visibility, _apply_filter as they were) ...
     def _clear_screen(self) -> None:
-        """Clears the terminal screen."""
-        command = 'cls' if platform.system().lower() == "windows" else 'clear'
-        os.system(command)
+        if self.clear_screen_on_run and self.file == sys.stdout:
+            command = 'cls' if platform.system().lower() == "windows" else 'clear'
+            os.system(command)
 
     def _set_cursor_visibility(self, visible: bool):
-        """Show or hide the terminal cursor using ANSI codes."""
-        if self.file == sys.stdout: # Only modify cursor for stdout
+        if self.hide_cursor and self.file == sys.stdout:
             code = "\x1b[?25h" if visible else "\x1b[?25l"
             try:
                 print(code, end="", flush=True, file=self.file)
-            except Exception:
-                # Ignore errors if stream is not a compatible terminal
-                pass
+            except Exception: pass
 
-    def _display_menu(self, current_selection: int, all_options: List[MenuItem]):
-        """Internal method to draw the menu with the current selection highlighted."""
-        if self.clear_screen_on_run:
-            self._clear_screen()
-        else:
-            # If not clearing, attempt to move cursor up to overwrite previous menu
-            # (Requires knowing previous menu height - complex)
-            # Simpler: just print without clearing for now.
-            pass
+    def _apply_filter(self):
+        if not self.enable_filtering or not self._filter_text:
+            if self._original_items is None: self._original_items = list(self.items)
+            self.items = list(self._original_items)
+            return
 
-        # Display Title
+        if self._original_items is None: self._original_items = list(self.items)
+        f_text = self._filter_text.lower()
+        # Preserve Back/Quit/Confirm items during filtering
+        preserved_items = [item for item in self._original_items if item.item_type in ('back', 'quit', 'confirm_multi')]
+        filtered_main = [item for item in self._original_items if item.item_type not in ('back', 'quit', 'confirm_multi') and f_text in item.text.lower()]
+        self.items = filtered_main # Only main items are filtered now
+        # Selection index should only apply to filtered main items if filter is active
+        self._current_selection_idx = min(self._current_selection_idx, max(0, len(self.items) - 1))
+
+
+    # --- Display and Input Handling ---
+    # ... (Keep _get_display_items, _display_menu, _handle_input as they were - they seemed logically correct before) ...
+    # Small correction in _get_display_items to use the potentially filtered self.items
+    def _get_display_items(self) -> List[MenuItem]:
+        # Start with current self.items (which might be filtered)
+        display_list = list(self.items)
+
+        # Add Back/Quit/Confirm options (which are *not* part of self.items normally)
+        # These should *always* be available regardless of filter text.
+        # Get them from _original_items if available, or create anew
+        back_quit_confirm = []
+        original_list = self._original_items if self._original_items is not None else self.items # Fallback needed?
+
+        if self.parent:
+             # Look for Back in original items if it was ever added, otherwise create
+             back_item = next((item for item in original_list if item.item_type == 'back'), None)
+             if back_item is None: back_item = MenuItem("Back", "back", None)
+             back_quit_confirm.append(back_item)
+        elif self.mode != 'select_single':
+             quit_item = next((item for item in original_list if item.item_type == 'quit'), None)
+             if quit_item is None: quit_item = MenuItem("Quit", "quit", None)
+             back_quit_confirm.append(quit_item)
+
+        if self.mode == 'select_multiple':
+             confirm_item = next((item for item in original_list if item.item_type == 'confirm_multi'), None)
+             if confirm_item is None: confirm_item = MenuItem("Confirm Selection", "confirm_multi", None)
+             back_quit_confirm.append(confirm_item)
+
+        # Append the control items to the (potentially filtered) display list
+        display_list.extend(back_quit_confirm)
+        return display_list
+
+    # _display_menu remains the same as the previous good version
+    def _display_menu(self):
+        self._clear_screen()
+
+        display_items = self._get_display_items()
+        num_display_items = len(display_items)
+        active_selection_idx = self._current_selection_idx
+
         ASCIIColors.print(self.title, color=self.styles['title'], style="", file=self.file)
-        # Use strip_ansi to calculate length correctly for the separator line
-        ASCIIColors.print("-" * len(strip_ansi(self.title)), color=self.styles['title'], style="", file=self.file)
+        separator_line = "-" * len(strip_ansi(self.title))
+        ASCIIColors.print(separator_line, color=self.styles['title'], style="", file=self.file)
 
-        # Display Items
-        for i, item in enumerate(all_options):
-            style_and_color: str
-            if i == current_selection:
-                prefix = self.prefixes['selected']
-                style_and_color = self.styles['selected']
+        visible_item_indices = list(range(num_display_items))
+
+        for i in visible_item_indices:
+            item = display_items[i]
+            is_highlighted = (i == active_selection_idx and not self._is_editing_input)
+            line_parts = []
+            nav_prefix = self.prefixes['selected'] if is_highlighted else self.prefixes['unselected']
+            sel_prefix = ""
+
+            # Determine prefixes based on mode and state
+            if item.item_type != 'separator':
+                is_selectable = item.item_type not in ('back', 'quit', 'confirm_multi')
+                if self.mode == 'select_multiple' and is_selectable:
+                    sel_prefix = self.prefixes['checkbox_sel'] if item.selected else self.prefixes['checkbox_unsel']
+                elif self.mode == 'select_single' and is_selectable:
+                    sel_prefix = self.prefixes['radio_sel'] if is_highlighted else self.prefixes['radio_unsel']
+                line_parts.append(nav_prefix + sel_prefix)
             else:
-                prefix = self.prefixes['unselected']
-                # Use custom item color if provided and item is not selected
-                item_base_style = self.styles.get("item_style_only", "") # Base item style
-                if item.custom_color:
-                    # Combine base style with custom color
-                    style_and_color = item_base_style + item.custom_color
-                else:
-                    # Use default combined item style + color
-                    style_and_color = self.styles['item']
+                 line_parts.append(" " * len(self.prefixes['unselected'])) # Indent separators
 
-            # Print styled item line
-            line = f"{prefix}{item.text}"
-            # Apply style, print, then reset
-            ASCIIColors.print(f"{style_and_color}{line}{ASCIIColors.color_reset}", file=self.file)
+            # Determine styling
+            item_style_code = ""
+            if item.item_type == 'separator': item_style_code = self.styles['separator']
+            elif item.disabled: item_style_code = self.styles['disabled']
+            elif is_highlighted: item_style_code = self.styles['selected_highlight']
+            else:
+                item_style_code = (self.styles['item_style_only'] + item.custom_color) \
+                                   if item.custom_color else self.styles['item_default']
+                if self.mode == 'select_multiple' and item.selected and is_selectable:
+                    item_style_code += ASCIIColors.style_bold # Style selected items in multi-mode
 
-        # Display Prompt
-        ASCIIColors.print(f"\n{self.prompt_text}", color=self.styles['prompt'], style="", file=self.file)
+            # Format item text (handle input fields)
+            item_text = item.text
+            if item.is_input:
+                 input_val = item.input_value
+                 if self._is_editing_input and i == self._editing_item_idx:
+                     pos = self._input_cursor_pos
+                     cursor_char = input_val[pos] if pos < len(input_val) else " "
+                     # Apply cursor style, ensuring reset and re-application of base style
+                     input_val = f"{input_val[:pos]}{self.styles['input_cursor']}{cursor_char}{ASCIIColors.color_reset}{item_style_code}{input_val[pos+1:]}"
+                 item_text = f"{item.text}[{input_val}]"
+            line_parts.append(item_text)
 
+            # Print the styled line
+            full_line = "".join(line_parts)
+            # Apply style, print, then reset (ASCIIColors.print handles final reset)
+            # Ensure the base style is applied before the line content
+            print(f"{item_style_code}{full_line}{ASCIIColors.color_reset}", file=self.file)
 
-    def run(self) -> None:
-        """
-        Displays the menu, handles arrow key navigation, and executes selections.
+        # Display Help Text Area
+        help_text_to_display = ""
+        if self.help_area_height > 0 and num_display_items > 0:
+             highlighted_item_index = active_selection_idx
+             if 0 <= highlighted_item_index < num_display_items:
+                 current_item = display_items[highlighted_item_index]
+                 if current_item.help_text:
+                     term_width = shutil.get_terminal_size((80, 20)).columns
+                     wrapped_lines = textwrap.wrap(current_item.help_text, width=max(10, term_width - 2), max_lines=self.help_area_height)
+                     help_text_to_display = "\n".join(wrapped_lines)
 
-        The loop continues until the user selects "Quit" or "Back", or presses Ctrl+C.
-        Uses Up/Down arrows for navigation and Enter for selection.
-        """
-        current_selection = 0
-        if self.hide_cursor:
-            self._set_cursor_visibility(False)
+        num_help_lines = help_text_to_display.count('\n') + 1 if help_text_to_display else 0
+        blank_lines = max(0, self.help_area_height - num_help_lines)
+        if self.help_area_height > 0:
+            print("\n" * blank_lines, end="", file=self.file)
+            if help_text_to_display:
+                ASCIIColors.print(help_text_to_display, color=self.styles['help'], file=self.file)
+
+        # Display Filter Input
+        if self.enable_filtering:
+            filter_indicator = "_" if not self._is_editing_input else "" # Show cursor only when not editing item
+            filter_line = f"\n{self.prompts['filter']}{self._filter_text}{filter_indicator}"
+            ASCIIColors.print(filter_line, color=self.styles['filter'], end="", file=self.file)
+            print(" " * 20, end="\r", file=self.file) # Clear rest of line, move cursor back
+
+        # Display Main Prompt
+        ASCIIColors.print(f"\n{self.prompts['main']}", color=self.styles['prompt'], file=self.file)
+
+    # _handle_input remains the same as the previous good version
+    def _handle_input(self, display_items: List[MenuItem]) -> bool:
+        """Handles a single key press and updates menu state. Returns True to continue loop."""
+        key = _get_key()
+        num_display_items = len(display_items)
+        # Get the currently highlighted item *from the display list*
+        current_display_item = display_items[self._current_selection_idx] if 0 <= self._current_selection_idx < num_display_items else None
+
+        # --- Input Field Editing ---
+        if self._is_editing_input and current_display_item and current_display_item.is_input:
+            # Find the actual item instance being edited (likely in self.items if filtered, or _original_items if not)
+            # We need the *actual object* to modify its input_value
+            list_to_search = self.items # self.items contains the currently displayed non-control items
+            target_item = None
+            if 0 <= self._editing_item_idx < len(list_to_search):
+                 # Assuming _editing_item_idx refers to index within self.items
+                 potential_target = list_to_search[self._editing_item_idx]
+                 # Ensure it's the correct item (paranoid check)
+                 if potential_target is current_display_item:
+                     target_item = potential_target
+
+            if target_item:
+                if key == 'ENTER' or key == 'ESCAPE':
+                    self._is_editing_input = False; self._editing_item_idx = None
+                elif key == 'BACKSPACE':
+                    if self._input_cursor_pos > 0:
+                        target_item.input_value = target_item.input_value[:self._input_cursor_pos-1] + target_item.input_value[self._input_cursor_pos:]
+                        self._input_cursor_pos -= 1
+                elif key == 'LEFT': self._input_cursor_pos = max(0, self._input_cursor_pos - 1)
+                elif key == 'RIGHT': self._input_cursor_pos = min(len(target_item.input_value), self._input_cursor_pos + 1)
+                elif len(key) == 1 and key.isprintable():
+                    target_item.input_value = target_item.input_value[:self._input_cursor_pos] + key + target_item.input_value[self._input_cursor_pos:]
+                    self._input_cursor_pos += 1
+            else: # Fallback if item mismatch
+                 self._is_editing_input = False; self._editing_item_idx = None
+            return True # Continue loop
+
+        # --- Filtering Input ---
+        if self.enable_filtering and not self._is_editing_input:
+            if len(key) == 1 and key.isprintable():
+                self._filter_text += key; self._apply_filter(); self._current_selection_idx = 0
+                return True
+            if key == 'BACKSPACE':
+                self._filter_text = self._filter_text[:-1]; self._apply_filter(); self._current_selection_idx = 0
+                return True
+
+        # --- Navigation and Selection (Not editing an item) ---
+        if key == 'UP':
+            original_idx = self._current_selection_idx
+            idx = original_idx
+            for _ in range(num_display_items): # Limit loops
+                idx = (idx - 1 + num_display_items) % num_display_items
+                if not display_items[idx].disabled: break # Find previous enabled
+            self._current_selection_idx = idx
+            # Ensure editing index is cleared if we navigate away
+            if self._is_editing_input: self._is_editing_input = False; self._editing_item_idx = None
+
+        elif key == 'DOWN':
+            original_idx = self._current_selection_idx
+            idx = original_idx
+            for _ in range(num_display_items): # Limit loops
+                idx = (idx + 1) % num_display_items
+                if not display_items[idx].disabled: break # Find next enabled
+            self._current_selection_idx = idx
+            # Ensure editing index is cleared if we navigate away
+            if self._is_editing_input: self._is_editing_input = False; self._editing_item_idx = None
+
+        # --- SPACE Key Handling ---
+        elif key == 'SPACE' or key == ' ':
+             if self.mode == 'select_multiple' and current_display_item and \
+                current_display_item.item_type not in ('back', 'quit', 'separator', 'confirm_multi') and \
+                not current_display_item.disabled:
+                 # --- Find and Toggle in _original_items ---
+                 # Use the 'value' or 'text' as a key if identity fails. Value is preferred if unique.
+                 found_original = False
+                 if self._original_items:
+                     for orig_item in self._original_items:
+                         # Try matching by object identity first
+                         if orig_item is current_display_item:
+                              orig_item.selected = not orig_item.selected
+                              found_original = True
+                              break
+                     # Fallback: Match by value AND type (if identity failed)
+                     if not found_original:
+                          for orig_item in self._original_items:
+                              if orig_item.value == current_display_item.value and orig_item.item_type == current_display_item.item_type:
+                                  orig_item.selected = not orig_item.selected
+                                  found_original = True
+                                  break
+                     # Fallback: Match by text AND type (if value match failed or value is not unique)
+                     if not found_original:
+                           for orig_item in self._original_items:
+                               if orig_item.text == current_display_item.text and orig_item.item_type == current_display_item.item_type:
+                                   orig_item.selected = not orig_item.selected
+                                   found_original = True
+                                   break
+                 # --- End Find and Toggle ---
+
+        # --- ENTER Key Handling ---
+        elif key == 'ENTER':
+            if not current_display_item or current_display_item.disabled: return True # Ignore if disabled
+            item_type = current_display_item.item_type
+            target = current_display_item.target
+
+            # --- Multi-Select Toggle on Enter ---
+            # Check if we are in multi-select mode AND the item is a choice item (not control/sep)
+            if self.mode == 'select_multiple' and item_type not in ('back', 'quit', 'separator', 'confirm_multi'):
+                 # Find and Toggle in _original_items (using the same logic as SPACE)
+                 found_original = False
+                 if self._original_items:
+                     for orig_item in self._original_items:
+                          if orig_item is current_display_item:
+                               orig_item.selected = not orig_item.selected; found_original = True; break
+                     if not found_original: # Fallback checks
+                          for orig_item in self._original_items:
+                               if orig_item.value == current_display_item.value and orig_item.item_type == current_display_item.item_type:
+                                   orig_item.selected = not orig_item.selected; found_original = True; break
+                     if not found_original:
+                           for orig_item in self._original_items:
+                               if orig_item.text == current_display_item.text and orig_item.item_type == current_display_item.item_type:
+                                   orig_item.selected = not orig_item.selected; found_original = True; break
+                 # After toggling, do nothing else for this item on Enter in multi-select
+                 return True # Continue the loop to show the new state
+
+            # --- Existing Enter Logic (execute actions, submenus, controls, single-select) ---
+            elif item_type == 'action':
+                if current_display_item.is_input: # Enter on an input field STARTS editing
+                    self._is_editing_input = True
+                    # Store the index *within the current display_items* that is being edited
+                    self._editing_item_idx = self._current_selection_idx
+                    self._input_cursor_pos = len(current_display_item.input_value)
+                    return True # Stay in loop, enter editing mode
+
+                elif callable(target): # Regular action execution
+                    exit_menu_after = False; action_result = None
+                    try:
+                        if self.hide_cursor: self._set_cursor_visibility(True)
+                        if self.clear_screen_on_run: self._clear_screen()
+                        action_result = target()
+                        if current_display_item.exit_on_success and action_result is not False:
+                            exit_menu_after = True; self._quit_menu = True; self._run_result = current_display_item.value
+                    except Exception as e:
+                        if self.hide_cursor: self._set_cursor_visibility(True)
+                        ASCIIColors.error(self.prompts['error'], file=self.file); trace_exception(e)
+                    finally:
+                        if not exit_menu_after and self.mode == 'execute':
+                             if self.hide_cursor: self._set_cursor_visibility(False)
+                             ASCIIColors.print(self.prompts['confirm'], color=self.styles['prompt'], end="", flush=True, file=self.file)
+                             confirm_key = ''
+                             while confirm_key != 'ENTER': confirm_key = _get_key()
+                        elif exit_menu_after: return False
+                # If target not callable (e.g., a simple choice item in execute mode), do nothing on Enter
+
+            elif item_type == 'submenu':
+                if isinstance(target, Menu): target.run()
+                else: ASCIIColors.error(f"Error: Submenu target is not a Menu instance.", file=self.file)
+
+            elif item_type == 'back': self._quit_menu = True; return False
+            elif item_type == 'quit': self._quit_menu = True; self._run_result = None; return False
+            elif item_type == 'confirm_multi':
+                 if self.mode == 'select_multiple':
+                     # Base selection result on _original_items which holds the correct state
+                     self._run_result = [item.value for item in (self._original_items or []) if item.selected and not item.disabled and item.item_type not in ('back', 'quit', 'separator', 'confirm_multi')]
+                     self._quit_menu = True; return False
+
+            # Single Selection Mode handling
+            if self.mode == 'select_single' and item_type not in ('back', 'quit', 'separator'):
+                 self._run_result = current_display_item.value # Return value of the selected item
+                 self._quit_menu = True; return False
+
+        # --- QUIT Key Handling (Ctrl+C) ---
+        elif key == 'QUIT':
+            self._run_result = None
+            self._quit_menu = True
+            if not self.parent:
+                ASCIIColors.print("\nQuitting menu.", color=self.styles['prompt'], file=self.file)
+            return False # Exit loop
+
+        # --- Other keys ---
+        # If filtering is not enabled, you might want to show the invalid key prompt
+        # elif not self.enable_filtering:
+        #     ASCIIColors.print(self.prompts['invalid'], color=self.styles['error'], end="\r", file=self.file)
+        #     time.sleep(0.5)
+
+        return True # Continue loop by default
+
+    # --- Main Run Method ---
+    # ... (Keep run method exactly as it was in the previous good response) ...
+    def run(self) -> Any:
+        if self.hide_cursor: self._set_cursor_visibility(False)
+
+        self._current_selection_idx = 0
+        self._filter_text = ""
+        self._is_editing_input = False
+        self._editing_item_idx = None
+        self._quit_menu = False
+        self._run_result = None
+        if self.enable_filtering: self._original_items = list(self.items)
+        else: self._original_items = None
 
         try:
-            while True:
-                # Combine main items with Back/Quit options for navigation
-                all_options = list(self.items) # Copy main items
-                if self.parent:
-                    # Add Back option to submenus
-                    all_options.append(MenuItem("Back", "back", None))
-                else:
-                    # Add Quit option to root menu
-                    all_options.append(MenuItem("Quit", "quit", None))
+            while not self._quit_menu:
+                self._apply_filter() # Apply filter potentially modifying self.items
+                display_items = self._get_display_items() # Get items + controls
 
-                num_options = len(all_options)
-                if num_options == 0:
-                    ASCIIColors.print("Menu is empty.", color=self.styles['error'], file=self.file)
-                    return # Nothing to select
+                if not display_items:
+                    self._clear_screen()
+                    ASCIIColors.print(self.title, color=self.styles['title'], file=self.file)
+                    ASCIIColors.print("-" * len(strip_ansi(self.title)), color=self.styles['title'], file=self.file)
+                    ASCIIColors.print("\n(No items to display)", color=self.styles['disabled'], file=self.file)
+                    filter_indicator = "_" if not self._is_editing_input else ""
+                    if self.enable_filtering:
+                        ASCIIColors.print(f"\n{self.prompts['filter']}{self._filter_text}{filter_indicator}", color=self.styles['filter'], end="", file=self.file)
+                    ASCIIColors.print(f"\n{self.prompts['main']}", color=self.styles['prompt'], file=self.file)
 
-                # Ensure selection index is valid (can happen if items change - not fully supported yet)
-                current_selection = max(0, min(current_selection, num_options - 1))
+                    key = _get_key() # Handle basic input when empty
+                    if self.enable_filtering and key == 'BACKSPACE': self._filter_text = self._filter_text[:-1]
+                    elif key == 'QUIT': self._quit_menu = True; self._run_result = None
+                    elif self.enable_filtering and len(key)==1 and not key.isctrl(): self._filter_text += key
+                    continue
 
-                self._display_menu(current_selection, all_options)
+                # Adjust selection index if needed
+                self._current_selection_idx = max(0, min(self._current_selection_idx, len(display_items) - 1))
+                # Attempt to land on a non-disabled item initially
+                initial_idx = self._current_selection_idx
+                count = 0
+                while display_items[self._current_selection_idx].disabled and count < len(display_items):
+                    self._current_selection_idx = (self._current_selection_idx + 1) % len(display_items)
+                    count += 1
+                    if self._current_selection_idx == initial_idx: break # All might be disabled
 
-                # --- Get User Input ---
-                key = _get_key()
-
-                # --- Process Input ---
-                if key == 'UP':
-                    current_selection = (current_selection - 1 + num_options) % num_options
-                elif key == 'DOWN':
-                    current_selection = (current_selection + 1) % num_options
-                elif key == 'ENTER':
-                    selected_item = all_options[current_selection]
-
-                    # --- Handle Selection ---
-                    if selected_item.type == 'action':
-                        if self.clear_screen_on_run: self._clear_screen() # Clear before action output
-                        try:
-                            # Show cursor during action execution if needed
-                            if self.hide_cursor: self._set_cursor_visibility(True)
-                            # Ensure target is callable before calling
-                            if callable(selected_item.target):
-                                selected_item.target() # Call the action function
-                            else:
-                                ASCIIColors.error(f"Error: Action target for '{selected_item.text}' is not callable.", file=self.file)
-
-                            # Hide cursor again before asking for confirmation
-                            if self.hide_cursor: self._set_cursor_visibility(False)
-
-                            # Wait for confirmation to return to menu
-                            ASCIIColors.print("\nPress Enter to continue...", color=self.styles['prompt'], end="", flush=True, file=self.file)
-                            while _get_key() != 'ENTER': pass # Wait specifically for Enter
-                        except Exception as e:
-                            # Show cursor if error occurred during action
-                            if self.hide_cursor: self._set_cursor_visibility(True)
-                            ASCIIColors.error("Error executing action:", file=self.file)
-                            trace_exception(e) # Log the exception using the logging system
-                            # Hide cursor again before confirmation
-                            if self.hide_cursor: self._set_cursor_visibility(False)
-                            ASCIIColors.print("\nPress Enter to continue...", color=self.styles['prompt'], end="", flush=True, file=self.file)
-                            while _get_key() != 'ENTER': pass # Wait for Enter
-                    elif selected_item.type == 'submenu':
-                        # Run the submenu (ensure target is a Menu instance)
-                        if isinstance(selected_item.target, Menu):
-                            # Cursor visibility is handled recursively by the submenu's run()
-                            selected_item.target.run()
-                        else:
-                            ASCIIColors.error(f"Error: Submenu target for '{selected_item.text}' is not a Menu instance.", file=self.file)
-                            # Optionally wait for Enter here too?
-                    elif selected_item.type == 'back':
-                        return # Exit this menu's run loop (goes back to parent)
-                    elif selected_item.type == 'quit':
-                        break # Exit the main loop (only for root menu)
-
-                elif key == 'QUIT': # Handle Ctrl+C (_get_key returns 'QUIT')
-                     # Ensure cursor is visible before potentially exiting
-                     if self.hide_cursor: self._set_cursor_visibility(True)
-
-                     if self.parent: # In a submenu
-                         # Just return, acting like 'Back'
-                         return
-                     else: # In the root menu
-                         ASCIIColors.print("\nQuitting menu.", color=self.styles['prompt'], file=self.file)
-                         break # Quit the application/main menu loop
-
-                # Ignore other keys (e.g., ESCAPE, regular characters) for now
+                self._display_menu()
+                if not self._handle_input(display_items): break # Exit loop
 
         finally:
-            # --- Ensure cursor is visible on exit ---
-            # This runs when the loop breaks (Quit) or returns (Back)
-            if self.hide_cursor:
-                self._set_cursor_visibility(True)
-            # Optional: Clear screen on final exit? Depends on desired behavior.
-            # if self.clear_screen_on_run and not self.parent: self._clear_screen()
-# --- TQDM-like ProgressBar ---
+            if self.hide_cursor: self._set_cursor_visibility(True)
+
+        # Store input values back into original items if filter was used
+        if self._original_items:
+             for display_item in self.items: # Iterate through potentially filtered items
+                  if display_item.is_input:
+                       # Find corresponding original item and update its input_value
+                       original_item = next((item for item in self._original_items if item is display_item), None)
+                       if original_item:
+                            original_item.input_value = display_item.input_value
+
+
+        return self._run_result
+
+
+# =======================
+# TQDM style Progressbar
+# =======================
+
+# Attempt to import wcwidth, provide dummy functions if not available
+try:
+    from wcwidth import wcswidth, wcwidth
+except ImportError:
+    # Define dummy functions if wcwidth is not installed
+    # This allows the library to run, but width calculations will be inaccurate for wide chars.
+    print("Warning: 'wcwidth' library not found. Progress bar display accuracy for wide characters (like emojis) may be reduced. Install with 'pip install wcwidth'", file=sys.stderr)
+    def wcswidth(pwcs: str) -> int:
+        return len(pwcs)
+    def wcwidth(pwc: str) -> int:
+        # Basic check for known wide ranges (incomplete)
+        if not pwc: return 0
+        if 0x1100 <= ord(pwc[0]) <= 0x115F: return 2 # Hangul Jamo
+        if 0x2329 <= ord(pwc[0]) <= 0x232A: return 2 # Braille
+        if 0x2E80 <= ord(pwc[0]) <= 0x3247: return 2 # CJK.. Kanji radicals.. etc
+        if 0x3250 <= ord(pwc[0]) <= 0x4DBF: return 2 # Enclosed CJK letters... I Ching hexagrams
+        if 0x4E00 <= ord(pwc[0]) <= 0xA4C6: return 2 # CJK Unified Ideographs... Yi syllables
+        if 0xA960 <= ord(pwc[0]) <= 0xA97C: return 2 # Hangul Jamo Extended-A
+        if 0xAC00 <= ord(pwc[0]) <= 0xD7A3: return 2 # Hangul Syllables
+        if 0xF900 <= ord(pwc[0]) <= 0xFAFF: return 2 # CJK Compatibility Ideographs
+        if 0xFE10 <= ord(pwc[0]) <= 0xFE19: return 2 # Vertical forms
+        if 0xFE30 <= ord(pwc[0]) <= 0xFE6F: return 2 # CJK Compatibility Forms.. Small forms
+        if 0xFF00 <= ord(pwc[0]) <= 0xFF60: return 2 # Fullwidth forms
+        if 0xFFE0 <= ord(pwc[0]) <= 0xFFE6: return 2 # Fullwidth forms
+        if 0x1B000 <= ord(pwc[0]) <= 0x1B001: return 2 # Kana Supplement
+        if 0x1F200 <= ord(pwc[0]) <= 0x1F251: return 2 # Enclosed Ideographic Supplement
+        if 0x1F300 <= ord(pwc[0]) <= 0x1F64F: return 2 # Miscellaneous Symbols and Pictographs... Emoticons
+        if 0x1F680 <= ord(pwc[0]) <= 0x1F6FF: return 2 # Transport and Map Symbols
+        if 0x20000 <= ord(pwc[0]) <= 0x3FFFD: return 2 # CJK Unified Ideographs Extension B .. Tertiary Ideographic Plane
+        # Fallback for combining chars etc (ambiguous)
+        if 0x0300 <= ord(pwc[0]) <= 0x036F: return 0 # Combining diacritical marks
+        if 0x20D0 <= ord(pwc[0]) <= 0x20FF: return 0 # Combining diacritical marks for symbols
+        # Default
+        return 1
 
 class ProgressBar:
     """
     A customizable, thread-safe progress bar similar to `tqdm`, using `ASCIIColors` for styling.
 
-    Can be used as an iterator wrapper or a context manager for manual updates.
+    Can be used as an iterator wrapper or a context manager for manual updates. Includes different
+    bar styles ('fill', 'blocks', 'line', 'emoji') and handles indeterminate progress (no total)
+    with an animation. Adapts to terminal width using `wcwidth` for accurate character sizing.
 
     Uses direct terminal printing (`ASCIIColors.print` with `\\r`) and is independent
     of the logging system.
@@ -2760,26 +3118,36 @@ class ProgressBar:
 
     .. code-block:: python
 
-        from ascii_colors import ProgressBar
+        from ascii_colors import ProgressBar, ASCIIColors
         import time
 
         # As an iterator wrapper
         for i in ProgressBar(range(100), desc="Processing Items"):
             time.sleep(0.05)
 
-        # Manual control with context manager
+        # Manual control with context manager and different style
         total_steps = 50
-        with ProgressBar(total=total_steps, desc="Manual Task", color=ASCIIColors.color_cyan) as pbar:
+        with ProgressBar(total=total_steps, desc="Manual Task", bar_style='line',
+                         color=ASCIIColors.color_cyan) as pbar:
             for step in range(total_steps):
-                # Simulate work
                 time.sleep(0.02)
                 pbar.update(1)
-                if step == total_steps // 2:
-                    pbar.set_description("Halfway Done")
+
+        # Indeterminate progress
+        with ProgressBar(desc="Waiting...", unit=" tasks") as pbar:
+             for _ in range(5):
+                 time.sleep(0.5)
+                 pbar.update() # No total, just update count
+
+        # Emoji style (requires terminal support for wide characters)
+        with ProgressBar(range(40), desc="Rockets!", bar_style='emoji',
+                         emoji_fill="🚀", emoji_empty="🌑") as pbar:
+            for _ in pbar:
+                time.sleep(0.05)
 
     Attributes:
         iterable (Optional[Iterable]): The iterable being processed (if provided).
-        total (Optional[int]): The total number of expected iterations.
+        total (Optional[int]): The total number of expected iterations. If None, shows indeterminate animation.
         desc (str): Prefix for the progress bar description.
         unit (str): String that will be used to define the unit of each iteration.
         ncols (Optional[int]): The width of the entire output message. If specified,
@@ -2787,23 +3155,26 @@ class ProgressBar:
                                use terminal width.
         bar_format (Optional[str]): Specify a custom bar string format. May contain
                                     '{l_bar}', '{bar}', '{r_bar}'. Default includes
-                                    desc, %, bar, count, rate, eta.
+                                    desc, %, bar, count, rate, eta. For indeterminate
+                                    bars, only {l_bar}, {bar}, {n}, {elapsed}, {rate_fmt}, {unit}
+                                    are reliably substituted.
         leave (bool): If True, leaves the finished progress bar on screen.
         position (int): Specify the line offset to print this bar (0 - default).
-                        Useful for managing multiple bars, but requires careful
-                        manual management. Note: `ascii_colors` doesn't fully manage
-                        nested/multiple bars like `tqdm` might.
+                        Note: `ascii_colors` doesn't fully manage nested/multiple bars.
         mininterval (float): Minimum progress display update interval (seconds).
         color (str): ANSI color code for the progress bar/text.
         style (str): ANSI style code for the progress bar/text.
         background (str): ANSI background code for the progress bar/text.
-        progress_char (str): Character(s) representing filled progress.
-        empty_char (str): Character(s) representing remaining progress.
-        bar_style (str): Style of the bar ('fill', 'blocks'). Default 'fill'.
+        progress_char (str): Character(s) representing filled progress or animation. Default: '█'. For 'line' style, defaults internally to '─'.
+        empty_char (str): Character(s) representing remaining progress or animation background. Default: '░'. For 'line' style, defaults internally to ' '.
+        bar_style (str): Style of the bar: 'fill' (solid), 'blocks' (unicode), 'line' (growing line), 'emoji'. Default 'fill'.
+        emoji_fill (str): Character to use for filled part in 'emoji' style. Default "😊".
+        emoji_empty (str): Character to use for empty part in 'emoji' style. Default "😞".
         file (StreamType): Specify output file (default: sys.stdout).
     """
-    _default_bar_format = "{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}{unit}]"
-    _block_chars = [" ", "▏", "▎", "▍", "▌", "▋", "▊", "▉", "█"] # Unicode blocks for 'blocks' style
+    _default_bar_format = "{l_bar} {bar} | {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}{unit}]"
+    _indeterminate_bar_format = "{l_bar} {bar} [{elapsed}, {n_fmt} {unit}, {rate_fmt}{unit}/s]"
+    _block_chars = [" ", "▏", "▎", "▍", "▌", "▋", "▊", "▉", "█"]
 
     def __init__(
         self,
@@ -2814,14 +3185,16 @@ class ProgressBar:
         ncols: Optional[int] = None,
         bar_format: Optional[str] = None,
         leave: bool = True,
-        position: int = 0, # Note: Position handling is basic here
-        mininterval: float = 0.1, # Minimum time between updates
-        color: str = ASCIIColors.color_green, # Default color
+        position: int = 0,
+        mininterval: float = 0.1,
+        color: str = ASCIIColors.color_green,
         style: str = "",
         background: str = "",
-        progress_char: str = "█", # Block character
-        empty_char: str = "░", # Lighter block character
-        bar_style: str = "fill", # 'fill' or 'blocks'
+        progress_char: Optional[str] = None,
+        empty_char: Optional[str] = None,
+        bar_style: str = "fill",
+        emoji_fill: str = "😊",
+        emoji_empty: str = "😞",
         file: Optional[StreamType] = None,
         *args: Any, # Absorb other tqdm args for basic compatibility
         **kwargs: Any
@@ -2830,49 +3203,98 @@ class ProgressBar:
         self.desc = desc
         self.unit = unit
         self.ncols = ncols
-        self.bar_format = bar_format if bar_format is not None else self._default_bar_format
         self.leave = leave
-        self.position = position # Basic support
+        self.position = position # Basic support only
         self.mininterval = mininterval
         self.color = color
         self.style = style
         self.background = background
-        self.progress_char = progress_char
-        self.empty_char = empty_char
         self.bar_style = bar_style.lower()
+        self.emoji_fill = emoji_fill
+        self.emoji_empty = emoji_empty
         self.file = file if file is not None else sys.stdout
 
+        # Determine total first, as it affects format selection
+        resolved_total: Optional[int] = None
+        if total is not None:
+            resolved_total = total
+        elif iterable is not None:
+            try:
+                resolved_total = len(cast(Sized, iterable))
+            except (TypeError, AttributeError):
+                resolved_total = None
+        self.total = resolved_total
+
+        # Select appropriate bar format
+        if bar_format is None:
+            self.bar_format = self._indeterminate_bar_format if self.total is None else self._default_bar_format
+        else:
+            self.bar_format = bar_format
+
+        # Handle default progress/empty chars based on style
+        if self.bar_style == 'line':
+            self.progress_char = progress_char if progress_char is not None else "─"
+            self.empty_char = empty_char if empty_char is not None else " "
+        elif self.bar_style == 'blocks':
+            # Ensure single width for block style components
+            default_prog = "█"
+            default_empty = "░"
+            prog_char_resolved = progress_char if progress_char is not None else default_prog
+            empty_char_resolved = empty_char if empty_char is not None else default_empty
+
+            if wcswidth(prog_char_resolved) != 1:
+                ASCIIColors.warning(f"Multi-width progress_char '{prog_char_resolved}' incompatible with 'blocks' style. Using '{default_prog}'.")
+                self.progress_char = default_prog
+            else:
+                self.progress_char = prog_char_resolved
+
+            if wcswidth(empty_char_resolved) != 1:
+                ASCIIColors.warning(f"Multi-width empty_char '{empty_char_resolved}' incompatible with 'blocks' style. Using '{default_empty}'.")
+                self.empty_char = default_empty
+            else:
+                self.empty_char = empty_char_resolved
+        else: # 'fill', 'emoji', or unknown defaults
+            self.progress_char = progress_char if progress_char is not None else "█"
+            self.empty_char = empty_char if empty_char is not None else "░"
+            # Note: For emoji style, progress_char/empty_char are overridden in _render
+
+        # Internal state initialization
         self._iterator: Optional[Iterator[_T]] = None
-        self._lock = Lock() # For thread safety
-        self.n = 0 # Current progress
+        self._lock = Lock()
+        self.n = 0
         self.start_t = time.time()
         self.last_print_n = 0
         self.last_print_t = self.start_t
         self.elapsed = 0.0
         self._closed = False
 
-        # Determine total
-        if total is not None:
-            self.total = total
-        elif iterable is not None:
-            try:
-                self.total = len(cast(Sized, iterable)) # Attempt to get length
-            except (TypeError, AttributeError):
-                self.total = None # Cannot determine total
-        else:
-            self.total = None
-
     def __iter__(self) -> 'ProgressBar[_T]':
+        """Return the iterator object itself and initialize progress."""
         if self.iterable is None:
             raise ValueError("ProgressBar needs an iterable to be used in a for loop")
         self._iterator = iter(self.iterable)
-        self.start_t = time.time() # Reset timer on iteration start
+        self.start_t = time.time()
         self.last_print_t = self.start_t
         self.n = 0
+
+        # Re-check total and format on iteration start if total was initially unknown
+        if self.total is None:
+            try:
+                self.total = len(cast(Sized, self.iterable))
+                # If total is now known, switch format if needed
+                if self.total is not None and self.bar_format == self._indeterminate_bar_format:
+                    self.bar_format = self._default_bar_format
+            except (TypeError, AttributeError):
+                self.total = None # Still unknown
+                # Ensure format is indeterminate if it somehow got set wrong
+                if self.bar_format == self._default_bar_format:
+                    self.bar_format = self._indeterminate_bar_format
+
         self._render() # Initial render
         return self
 
     def __next__(self) -> _T:
+        """Return the next item from the iterator and update progress."""
         if self._iterator is None:
             raise RuntimeError("Cannot call next() before __iter__()")
         try:
@@ -2884,59 +3306,84 @@ class ProgressBar:
             raise
 
     def __enter__(self) -> 'ProgressBar[_T]':
-        self.start_t = time.time() # Reset timer on context entry
+        """Enter the runtime context related to this object."""
+        self.start_t = time.time()
         self.last_print_t = self.start_t
         self.n = 0
+        # Ensure correct format on entry
+        if self.total is None and self.bar_format == self._default_bar_format:
+            self.bar_format = self._indeterminate_bar_format
+        elif self.total is not None and self.bar_format == self._indeterminate_bar_format:
+             self.bar_format = self._default_bar_format
+
         self._render() # Initial render
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        """Exit the runtime context related to this object."""
         self.close()
 
     def update(self, n: int = 1) -> None:
-        """Increment the progress bar by `n` steps."""
+        """
+        Increment the progress bar manually.
+
+        Args:
+            n (int): Increment step value. Default is 1.
+        """
         if self._closed:
             return
         with self._lock:
             self.n += n
-            # Throttle rendering based on time interval
             current_t = time.time()
-            if current_t - self.last_print_t >= self.mininterval:
+            # Throttle rendering based on time interval or if it's the final update
+            is_final_update = (self.total is not None and self.n >= self.total)
+            if (current_t - self.last_print_t >= self.mininterval) or is_final_update:
                 self._render()
                 self.last_print_t = current_t
                 self.last_print_n = self.n
 
     def set_description(self, desc: str) -> None:
-        """Update the description text."""
+        """Update the description (prefix) of the progress bar."""
         with self._lock:
             self.desc = desc
-            # Consider re-rendering immediately or rely on next update?
-            # Re-rendering for description change is often desired.
-            self._render() # Re-render to show new description
+            current_t = time.time()
+            self._render() # Re-render immediately to show new description
+            self.last_print_t = current_t # Update time to avoid double print
 
     def close(self) -> None:
-        """Cleanup the progress bar."""
+        """Cleanup the progress bar display."""
         if self._closed:
             return
         with self._lock:
             self._closed = True
-            # Final render if leaving the bar
+            terminal_width = self._get_terminal_width() # Get width for clearing/newline check
+
             if self.leave:
+                # Ensure final state is rendered correctly
+                if self.total is not None:
+                    self.n = min(self.n, self.total) # Clamp progress
                 self._render(final=True)
-            # Move to the next line after the progress bar
-            # Check if file is valid before printing newline
-            if self.file and hasattr(self.file, 'write') and not getattr(self.file, 'closed', False):
-                 try:
-                    self.file.write("\n")
-                    self.file.flush()
-                 except Exception:
-                     # Handle potential errors writing newline (e.g., broken pipe)
-                     pass # Silently ignore on close error
+                # Add newline only if we likely printed something and are leaving it
+                if (self.last_print_n > 0 or self.n > 0 or self.total is not None) and \
+                   self.file and hasattr(self.file, 'write') and not getattr(self.file, 'closed', False):
+                    try:
+                        self.file.write("\n")
+                        self.file.flush()
+                    except Exception: pass # Ignore errors writing final newline
+            else:
+                # Clear the line if not leaving
+                if self.file and hasattr(self.file, 'write') and not getattr(self.file, 'closed', False):
+                     try:
+                         # Overwrite with spaces and return cursor
+                         self.file.write("\r" + " " * terminal_width + "\r")
+                         self.file.flush()
+                     except Exception: pass # Ignore errors clearing line
 
     def _format_time(self, seconds: float) -> str:
-        """Formats seconds into HH:MM:SS"""
+        """Formats seconds into a human-readable string HH:MM:SS or MM:SS."""
         if not math.isfinite(seconds) or seconds < 0:
             return "??:??"
+        seconds = abs(seconds) # Ensure positive
         m, s = divmod(seconds, 60)
         h, m = divmod(m, 60)
         if h:
@@ -2946,153 +3393,255 @@ class ProgressBar:
 
     def _estimate_eta(self) -> float:
         """Estimate remaining time (ETA) in seconds."""
-        if self.total is None or self.total == 0 or self.n == 0 or self.elapsed <= 0:
+        if self.total is None or self.total <= 0 or self.n <= 0 or self.elapsed <= 0:
             return float('inf') # Cannot estimate
+        # Prevent division by zero if elapsed is extremely small
+        if self.elapsed < 1e-9: return float('inf')
         rate = self.n / self.elapsed
-        if rate == 0:
+        if rate <= 1e-9: # Prevent division by zero rate
             return float('inf')
-        remaining_items = self.total - self.n
+        remaining_items = max(0, self.total - self.n)
         return remaining_items / rate
 
     def _get_terminal_width(self) -> int:
-        """Get terminal width, default to 80 if unavailable."""
+        """Get terminal width, falling back to defaults."""
         if self.ncols is not None:
-            return self.ncols
+            return max(10, self.ncols) # Ensure minimum width if fixed ncols is set
         try:
-            # Use shutil.get_terminal_size, fallback to 80
-            width = shutil.get_terminal_size((80, 20)).columns
-            # Add a small safety margin if width is determined
+            # Use shutil.get_terminal_size with fallback values
+            width, _ = shutil.get_terminal_size((80, 20))
             return max(10, width) # Ensure minimum width
-        except (OSError, AttributeError): # Handle errors/non-terminal environments
+        except (OSError, AttributeError, ValueError): # Handle errors/non-terminal environments
             return 80 # Default width
 
     def _render(self, final: bool = False) -> None:
-        """Render the progress bar to the stream."""
-        # This method MUST be called with the lock held
+        """Internal method to render the progress bar to the stream."""
+        # Assumes lock is held by the calling public method
 
-        if self._closed and not final: # Don't render if closed unless it's the final call
-             return
+        if self._closed and not final: return
 
-        # Calculate metrics
-        self.elapsed = time.time() - self.start_t
+        # --- Calculate metrics ---
+        current_t = time.time()
+        # Avoid updating elapsed time if it's the final render and already closed
+        if not (final and self._closed):
+             self.elapsed = current_t - self.start_t
+
         current_n = self.n
         current_total = self.total
         desc = f"{self.desc}: " if self.desc else ""
-
-        # Percentage and Counts
-        percentage_s = "?%"
-        n_fmt = str(current_n)
-        total_fmt = str(current_total) if current_total is not None else "?"
-        if current_total is not None and current_total > 0:
-            percentage = (current_n / current_total) * 100
-            percentage_s = f"{percentage:3.0f}%"
-        elif current_total == 0 and current_n == 0:
-            percentage = 100.0 # Handle 0/0 case as 100% complete
-            percentage_s = "100%"
-        elif current_total == 0:
-             percentage = 100.0 # If total is 0 but n > 0 (?), consider 100%? Or error?
-             percentage_s = "??%"
-
-        # Rate
-        rate = 0.0
-        if self.elapsed > 0:
-            rate = current_n / self.elapsed
-        rate_fmt = f"{rate:.2f}" if rate > 0.01 else "? "
-
-        # Time
         elapsed_str = self._format_time(self.elapsed)
-        eta_seconds = self._estimate_eta()
-        remaining_str = self._format_time(eta_seconds)
+        n_fmt = str(current_n)
+        rate = 0.0
+        if self.elapsed > 1e-9:
+            rate = current_n / self.elapsed
+        rate_fmt = f"{rate:.2f}" if rate > 0.01 else ("0.00" if self.elapsed > 0 else "?")
 
-        # Prepare left/right parts for bar_format
-        l_bar = f"{desc}{percentage_s}"
-        r_bar = f"| {n_fmt}/{total_fmt} [{elapsed_str}<{remaining_str}, {rate_fmt}{self.unit}]"
-
-        # Calculate available width for the bar itself
+        # --- Get terminal width ---
         terminal_width = self._get_terminal_width()
-        # Adjust for position if implemented fully (basic support here just prints)
-        prefix_len = len(strip_ansi(l_bar))
-        suffix_len = len(strip_ansi(r_bar))
-        # Leave space for '| ' between bar and r_bar
-        bar_width = terminal_width - prefix_len - suffix_len - 2 # -2 for "| "
-        bar_width = max(1, bar_width) # Ensure bar is at least 1 char wide
 
-        # --- Generate the actual progress bar string ---
+        # --- Define characters and their widths ---
+        bar_prog_char = self.progress_char
+        bar_empty_char = self.empty_char
+        if self.bar_style == 'emoji':
+            bar_prog_char = self.emoji_fill
+            bar_empty_char = self.emoji_empty
+
+        prog_char_width = max(1, wcwidth(bar_prog_char[0]) if bar_prog_char else 1)
+        empty_char_width = max(1, wcwidth(bar_empty_char[0]) if bar_empty_char else 1)
+
+        # --- Initialize bar string and format dict ---
         bar = ""
-        if current_total is not None and current_total > 0:
-            filled_len_exact = (current_n / current_total) * bar_width
-            filled_len = int(filled_len_exact)
-            remaining_len = bar_width - filled_len
+        full_bar_str = ""
+        format_dict: Dict[str, Any] = {
+            "n": current_n, "n_fmt": n_fmt,
+            "elapsed": elapsed_str, "rate": rate, "rate_fmt": rate_fmt,
+            "unit": self.unit, "desc": self.desc # Raw desc without colon
+        }
 
+        # --- Branch based on determinate/indeterminate ---
+        if current_total is None:
+            # === INDETERMINATE ===
+            l_bar = desc.strip()
+            format_dict["l_bar"] = l_bar
+            l_bar_stripped = strip_ansi(l_bar)
+
+            # Estimate available width for the bar
+            # Render a dummy format string to calculate static parts width
+            dummy_static_parts = self._indeterminate_bar_format.format(
+                l_bar=l_bar_stripped, bar="", elapsed="00:00", n_fmt="0", unit=self.unit, rate_fmt="?.??", n=0, desc=self.desc, rate=0.0
+            )
+            static_width = wcswidth(dummy_static_parts)
+            bar_width_cols = max(1, terminal_width - static_width)
+
+            # Bouncing Block Animation (width aware)
+            anim_width_cols = min(bar_width_cols, 25) # Limit animation visual width
+            speed_factor = 4
+            phase = int(time.time() * speed_factor)
+            movement_range = max(1, anim_width_cols - prog_char_width + 1)
+            pos_col = phase % (2 * (movement_range - 1)) if movement_range > 1 else 0
+            if pos_col >= movement_range:
+                 pos_col = 2 * (movement_range - 1) - pos_col
+
+            # Build animation string
+            anim_bar = ""
+            cols_so_far = 0
+            # Empty chars before block
+            if empty_char_width > 0:
+                num_empty_before = pos_col // empty_char_width
+                anim_bar += bar_empty_char * num_empty_before
+                cols_so_far += num_empty_before * empty_char_width
+            # The progress char block
+            if cols_so_far + prog_char_width <= anim_width_cols:
+                 anim_bar += bar_prog_char
+                 cols_so_far += prog_char_width
+            # Empty chars after block
+            remaining_anim_cols = anim_width_cols - cols_so_far
+            if empty_char_width > 0 and remaining_anim_cols > 0:
+                 num_empty_after = max(0, remaining_anim_cols // empty_char_width)
+                 anim_bar += bar_empty_char * num_empty_after
+                 cols_so_far += num_empty_after * empty_char_width
+
+            # Pad animation segment with spaces if needed
+            padding_spaces_anim = max(0, anim_width_cols - cols_so_far)
+            anim_bar += " " * padding_spaces_anim
+
+            # Pad the full bar with spaces
+            current_anim_cols = wcswidth(anim_bar) # Recalculate width accurately
+            padding_spaces_bar = max(0, bar_width_cols - current_anim_cols)
+            bar = anim_bar + " " * padding_spaces_bar
+
+            bar_styled = f"{self.color}{self.style}{self.background}{bar}{ASCIIColors.color_reset}"
+            format_dict["bar"] = bar_styled
+
+            try:
+                full_bar_str = self._indeterminate_bar_format.format(**format_dict)
+            except KeyError as e:
+                full_bar_str = f"[Format Error: Unknown key {e}] {l_bar}"
+
+        else:
+            # === DETERMINATE ===
+            percentage = 0.0
+            # Handle total=0 case correctly
+            if current_total > 0:
+                percentage = min(1.0, max(0.0, current_n / current_total))
+            elif current_total == 0:
+                 # Treat 0/0 as 100% only if finished or explicitly updating
+                 percentage = 1.0 if (final or current_n > 0) else 0.0
+
+            percentage_s = f"{percentage*100:3.0f}%"
+            total_fmt = str(current_total)
+            eta_seconds = self._estimate_eta()
+            remaining_str = self._format_time(eta_seconds)
+
+            l_bar = f"{desc}{percentage_s}"
+            r_bar_content = f"| {n_fmt}/{total_fmt} [{elapsed_str}<{remaining_str}, {rate_fmt}{self.unit}]"
+
+            l_bar_width = wcswidth(strip_ansi(l_bar))
+            r_bar_width = wcswidth(strip_ansi(r_bar_content))
+            # Default margins are one space before bar, one space before "|"
+            margins_width = wcswidth(" ") + wcswidth(" ")
+            bar_width_cols = max(1, terminal_width - l_bar_width - r_bar_width - margins_width)
+
+            target_filled_cols = int(percentage * bar_width_cols)
+
+            # Generate the bar string based on style
             if self.bar_style == 'blocks':
-                blocks_filled = self.progress_char * filled_len
-                partial_block_idx = int((filled_len_exact - filled_len) * len(self._block_chars))
-                partial_block = self._block_chars[partial_block_idx] if partial_block_idx > 0 else ""
-                # Adjust remaining len if partial block is used
-                actual_remaining_len = bar_width - len(blocks_filled) - (1 if partial_block else 0)
-                actual_remaining_len = max(0, actual_remaining_len)
-                empty_fill = self.empty_char * actual_remaining_len
-                bar = f"{blocks_filled}{partial_block}{empty_fill}"
+                # Assumes single-width characters (enforced in init)
+                filled_len_exact = percentage * bar_width_cols
+                filled_len_chars = int(filled_len_exact)
+                partial_block_idx = int((filled_len_exact - filled_len_chars) * len(self._block_chars))
+                # Ensure index is valid
+                partial_block = self._block_chars[min(partial_block_idx, len(self._block_chars)-1)] if partial_block_idx > 0 else ""
 
-            else: # Default 'fill' style
-                 bar = self.progress_char * filled_len + self.empty_char * remaining_len
-        elif current_total == 0 and current_n == 0:
-             bar = self.progress_char * bar_width # 100% filled for 0/0
-        else: # No total, show indeterminate or just empty? Tqdm shows empty
-             bar = self.empty_char * bar_width
+                cols_filled = filled_len_chars + wcswidth(partial_block) # Should be 1 or 0
+                remaining_cols = max(0, bar_width_cols - cols_filled)
+                num_empty_chars = remaining_cols
 
-        # Apply color/style to the bar components (example: color the filled part)
-        # More complex styling (e.g., gradient) could be added here.
-        bar_styled = f"{self.color}{self.style}{self.background}{bar}{ASCIIColors.color_reset}"
+                bar = (self.progress_char * filled_len_chars) + partial_block + (self.empty_char * num_empty_chars)
+                # Pad with spaces if calculation differs slightly from bar_width_cols
+                current_bar_cols = wcswidth(bar) # Should be bar_width_cols if chars are width 1
+                padding_spaces = max(0, bar_width_cols - current_bar_cols)
+                bar += " " * padding_spaces
 
-        # Construct final output string using bar_format placeholders
-        full_bar_str = self.bar_format.format(
-            l_bar=l_bar,
-            r_bar=r_bar,
-            bar=bar_styled, # Use the styled bar
-            n=current_n, n_fmt=n_fmt,
-            total=current_total, total_fmt=total_fmt,
-            percentage=percentage_s.strip(), # Remove padding for format use
-            elapsed=elapsed_str, remaining=remaining_str,
-            rate=rate, rate_fmt=rate_fmt,
-            unit=self.unit,
-            desc=self.desc
-        ).strip()
+            else: # Handles 'fill', 'line', 'emoji' or unknown
+                num_prog_chars = 0
+                cols_filled_by_prog = 0
+                if prog_char_width > 0:
+                    num_prog_chars = target_filled_cols // prog_char_width
+                    cols_filled_by_prog = num_prog_chars * prog_char_width
 
-        # Truncate if exceedsncols (shouldn't happen often with calculation above)
-        if len(strip_ansi(full_bar_str)) > terminal_width:
-            # Basic truncation (might cut mid-escape code, less ideal)
-            # A more robust truncate would need ANSI code awareness.
-            # For now, truncate based on visible length roughly.
-            cutoff = terminal_width - 3 # Room for "..."
-            # This simple slice isn't ANSI-aware, but might be okay for overflow
-            full_bar_str = full_bar_str[:cutoff] + "..."
+                remaining_cols = bar_width_cols - cols_filled_by_prog
+                num_empty_chars = 0
+                if empty_char_width > 0 and remaining_cols > 0:
+                    num_empty_chars = max(0, remaining_cols // empty_char_width)
+
+                bar = (bar_prog_char * num_prog_chars) + (bar_empty_char * num_empty_chars)
+
+                # Pad with spaces to the exact bar_width_cols
+                current_bar_cols = wcswidth(bar)
+                padding_spaces = max(0, bar_width_cols - current_bar_cols)
+                bar += " " * padding_spaces
+
+            bar_styled = f"{self.color}{self.style}{self.background}{bar}{ASCIIColors.color_reset}"
+
+            # Populate format dict for determinate bar
+            format_dict.update({
+                "l_bar": l_bar, "r_bar": r_bar_content, "bar": bar_styled,
+                "total": current_total, "total_fmt": total_fmt,
+                "percentage": percentage_s.strip(), "remaining": remaining_str,
+            })
+
+            try:
+                full_bar_str = self.bar_format.format(**format_dict)
+            except KeyError as e:
+                full_bar_str = f"[Format Error: Unknown key {e}] {l_bar} | {n_fmt}/{total_fmt}"
+
+
+        # --- Final width check and potential truncation ---
+        # Use wcswidth for truncation length check
+        full_bar_stripped = strip_ansi(full_bar_str)
+        visible_len = wcswidth(full_bar_stripped)
+        if visible_len > terminal_width:
+            # Attempt to truncate based on visible width
+            truncated = ""
+            current_len = 0
+            target_len = terminal_width - 3 # Leave space for "..."
+            # Iterate through the stripped string to find cut-off index
+            cut_index = 0
+            for i, char in enumerate(full_bar_stripped):
+                char_width = max(1, wcwidth(char))
+                if current_len + char_width > target_len:
+                    break
+                current_len += char_width
+                cut_index = i + 1
+            # Note: This truncation removes ANSI codes entirely.
+            # A better approach would involve parsing ANSI codes, which is complex.
+            full_bar_str = full_bar_stripped[:cut_index] + "..."
 
 
         # --- Direct Print using ASCIIColors ---
-        # Use '\r' to return to the beginning of the line
         prefix = "\r"
-        # Note: Position handling is basic. Real multi-bar requires cursor manipulation.
-        # If position > 0, we'd need ANSI codes to move cursor up, print, move down.
-        # This implementation just prints on the current line.
+        # Position handling is basic - does not handle multiple independent bars well
+        # if self.position > 0: prefix = f"\x1b[{self.position}E{prefix}" # Move down then return (experimental)
 
-        # Check if file is valid before printing
         if self.file and hasattr(self.file, 'write') and not getattr(self.file, 'closed', False):
             try:
-                # Use ASCIIColors.print to handle the final reset code implicitly
-                # We provide an empty color/style here because the bar itself contains codes
+                # Clear the rest of the line based on calculated terminal width
+                current_visible_len = wcswidth(strip_ansi(full_bar_str)) # Recalculate length after potential truncation
+                clear_suffix = " " * max(0, terminal_width - current_visible_len)
                 ASCIIColors.print(
-                    f"{prefix}{full_bar_str}",
-                    color="", style="", background="", # Bar string already has codes+reset
+                    f"{prefix}{full_bar_str}{clear_suffix}",
+                    color="", style="", background="", # Bar string has codes
                     end="", # No newline
                     flush=True,
                     file=self.file
                 )
             except Exception:
-                 # Handle potential write errors (e.g., closed pipe)
-                 self.close() # Attempt to close the bar if writing fails
-
-
+                 # Attempt to close gracefully if write fails
+                 try:
+                     self.close()
+                 except Exception: # Ignore errors during close-on-fail
+                     pass
 
 # ==============================================================================
 # --- Logging Compatibility Layer ---
@@ -3637,43 +4186,54 @@ if __name__ == "__main__":
     print("\n--- ProgressBar Demo ---")
     items = range(150)
 
-    # Basic iterable usage
-    print("Basic ProgressBar:")
+    # Basic iterable usage (default style 'fill', default format has margins now)
+    print("\nBasic ProgressBar ('fill' style):")
     for item in ProgressBar(items, desc="Basic Loop"):
         time.sleep(0.01)
 
-    # Different style and chars
+    # 'blocks' style
     print("\nStyled ProgressBar ('blocks'):")
     for item in ProgressBar(
         range(80),
-        desc="Styled",
+        desc="Styled Blocks",
         color=ASCIIColors.color_bright_yellow,
         style=ASCIIColors.style_bold,
-        progress_char="#",
+        progress_char="#", # Custom char for blocks
         empty_char=".",
         bar_style="blocks"
     ):
         time.sleep(0.02)
 
+    # --- NEW: 'line' style ---
+    print("\nSimple ProgressBar ('line' style):")
+    for item in ProgressBar(range(100), desc="Line Progress", bar_style='line', color=ASCIIColors.color_magenta):
+         time.sleep(0.015)
+
+    # --- NEW: 'emoji' style ---
+    print("\nEmoji ProgressBar ('emoji' style):")
+    for item in ProgressBar(range(60), desc="Emoji Fun", bar_style='emoji',
+                            emoji_fill="✅", emoji_empty="⏳"):
+        time.sleep(0.03)
+
     # Manual control with context manager
-    print("\nManual ProgressBar:")
+    print("\nManual ProgressBar (default 'fill'):")
     total_tasks = 120
-    with ProgressBar(total=total_tasks, desc="Manual", unit=" Task", color=ASCIIColors.color_magenta) as pbar:
+    with ProgressBar(total=total_tasks, desc="Manual", unit=" Task", color=ASCIIColors.color_cyan) as pbar:
         for i in range(total_tasks):
-            time.sleep(0.015)
+            time.sleep(0.01)
             pbar.update(1)
             if i == total_tasks // 3:
                 pbar.set_description("Stage 2")
             if i == 2 * total_tasks // 3:
                 pbar.set_description("Final Stage")
 
-    # Example with no total (indeterminate)
-    print("\nIndeterminate ProgressBar (Requires manual updates):")
+    # --- NEW: Indeterminate progress ---
+    print("\nIndeterminate ProgressBar (animation):")
     try:
-        with ProgressBar(desc="Waiting...", unit=" checks", color=ASCIIColors.color_cyan) as pbar:
-            for i in range(5): # Simulate fixed number of updates
-                time.sleep(0.5)
-                pbar.update(1)
+        with ProgressBar(desc="Working...", unit=" checks", color=ASCIIColors.color_yellow) as pbar:
+            for i in range(6): # Simulate updates without knowing total
+                time.sleep(0.4)
+                pbar.update(5) # Update count still works
     except Exception as e:
         ASCIIColors.error(f"Error in indeterminate bar: {e}")
 
@@ -3714,70 +4274,100 @@ if __name__ == "__main__":
         trace_exception(e)
 
     input(">>")
-    # --- Menu Demo ---
-    print("\n--- Menu Demo (Arrow Key Navigation) ---")
-    ASCIIColors.print("Note: Menu Demo requires interactive terminal with arrow key support.", color=ASCIIColors.color_yellow)
+    print("\n--- REVISED Menu Demo ---")
+    ASCIIColors.print("Note: Menu Demo requires interactive terminal.", color=ASCIIColors.color_yellow)
 
-    # Define some action functions (same as before)
-    def action_hello():
-        ASCIIColors.success("Hello from the menu action!")
+    # --- Action Functions ---
+    def show_platform(): ASCIIColors.success(f"Platform: {platform.system()}")
+    def test_login():
+        ASCIIColors.prompt("Username: ")
+        ASCIIColors.prompt("Password: ", hide_input=True)
+        ASCIIColors.info("Login attempt simulated...")
+        # Simulate success/failure for auto-exit demo
+        import random
+        success = random.choice([True, False])
+        if success:
+            ASCIIColors.green("Login Successful!")
+            return True # Signal success for exit_on_success
+        else:
+            ASCIIColors.error("Login Failed!")
+            return False # Signal failure
 
-    def action_info():
-        ASCIIColors.info("Displaying some info...")
-        print("System Platform:", platform.system())
-        print("Python Version:", sys.version.split()[0])
-
-    def action_fail():
-        ASCIIColors.warning("This action is designed to fail.")
-        raise RuntimeError("Simulated action failure")
-
-    # Create menus
+    # --- Create Menus ---
     root_menu = Menu(
-        title="Main Application Menu (Arrows + Enter)",
-        title_color=ASCIIColors.color_bright_cyan,
-        item_color=ASCIIColors.color_white,
-        selected_background=ASCIIColors.color_bg_blue,
-        selected_prefix="➔ ", # Use arrow prefix
-        unselected_prefix="  ",
-        prompt_text="Use ↑/↓ arrows, Enter to select. Ctrl+C to Quit/Back."
+        title="Unified CLI Menu (Test Features)",
+        clear_screen_on_run=True,
+        enable_filtering=True,
+        help_area_height=2 # Reserve lines for help
     )
 
-    settings_menu = Menu(
-        title="Settings Submenu",
-        parent=root_menu, # Important for Back option
-        title_color=ASCIIColors.color_yellow,
-        item_color=ASCIIColors.color_green,
-        selected_background=ASCIIColors.color_bg_magenta,
+    # -- Execute Mode Items --
+    root_menu.add_action("Show Platform", show_platform, help_text="Displays the current operating system.")
+    root_menu.add_action(
+        "Simulate Login",
+        test_login,
+        exit_on_success=True, # Exit menu immediately if login returns True
+        help_text="Runs a simulated login. Exits menu if successful.",
+        item_color=ASCIIColors.color_magenta
     )
-
-    more_menu = Menu(
-        title="More Options",
-        parent=settings_menu, # Nested submenu
-        item_color=ASCIIColors.color_magenta,
-        selected_background=ASCIIColors.color_bg_bright_black,
+    root_menu.add_input(
+        "Enter Name: ", initial_value="User", help_text="Type your name here.", item_color=ASCIIColors.color_cyan
     )
+    root_menu.add_separator()
 
-    # Add items to root menu (no keys needed)
-    root_menu.add_action("Say Hello", action_hello)
-    root_menu.add_action("Show System Info", action_info)
-    root_menu.add_submenu("Open Settings", settings_menu)
-    root_menu.add_action("Test Failing Action", action_fail, item_color=ASCIIColors.color_red)
+    # -- Single Selection Submenu --
+    single_select_menu = Menu(
+        title="Choose Output Format",
+        parent=root_menu,
+        mode='select_single', # This menu returns the selected value
+        help_area_height=1
+    )
+    single_select_menu.add_choice("Plain Text", value='txt', help_text="Standard text output.")
+    single_select_menu.add_choice("JSON", value='json', help_text="JavaScript Object Notation.")
+    single_select_menu.add_choice("YAML", value='yaml', help_text="YAML Ain't Markup Language.", disabled=True)
+    single_select_menu.add_choice("XML (Deprecated)", value='xml', help_text="Extensible Markup Language.", item_color=ASCIIColors.color_red)
+    root_menu.add_submenu("Select Format", single_select_menu, help_text="Choose one output format.")
 
-    # Add items to settings menu
-    settings_menu.add_action("Adjust Brightness (Placeholder)", lambda: print("Brightness adjusted!"))
-    settings_menu.add_action("Toggle Sound (Placeholder)", lambda: print("Sound toggled!"))
-    settings_menu.add_submenu("More Settings...", more_menu)
+    # -- Multiple Selection Submenu --
+    multi_select_menu = Menu(
+        title="Select Features to Enable",
+        parent=root_menu,
+        mode='select_multiple' # This menu returns a list of values
+    )
+    multi_select_menu.add_choice("Feature Alpha", value='alpha', selected=True) # Default selected
+    multi_select_menu.add_choice("Feature Beta", value='beta')
+    multi_select_menu.add_choice("Feature Gamma (Experimental)", value='gamma', item_color=ASCIIColors.color_yellow)
+    multi_select_menu.add_choice("Disabled Feature", value='delta', disabled=True)
+    root_menu.add_submenu("Configure Features", multi_select_menu, help_text="Toggle features using Spacebar.")
 
-    # Add items to the nested menu
-    more_menu.add_action("Reset Configuration (Placeholder)", lambda: print("Config reset!"))
-    more_menu.add_action("Check for Updates (Placeholder)", lambda: print("Checking..."))
+    root_menu.add_separator()
 
-    # Run the main menu (requires interactive terminal)
-    ASCIIColors.print("\nStarting interactive menu demo...\n", color=ASCIIColors.color_yellow)
-    # In a non-interactive test environment, this would hang or fail.
-    # Uncomment the next line to run interactively:
-    root_menu.run()
-    ASCIIColors.print("\nMenu demo finished or quit.", color=ASCIIColors.color_yellow)
+    # -- Nested Execute Submenu --
+    settings_menu = Menu(title="Settings", parent=root_menu)
+    settings_menu.add_action("Theme", lambda: print("Theme settings..."))
+    settings_menu.add_action("Network", lambda: print("Network settings..."))
+    root_menu.add_submenu("Settings", settings_menu, help_text="Basic configuration options.")
+
+
+    # --- Run the Menu ---
+    ASCIIColors.print("\nStarting interactive menu demo (Arrows, Enter, Space, Type to filter, Ctrl+C)...\n", color=ASCIIColors.color_yellow)
+
+    result = root_menu.run() # Run the main menu
+
+    ASCIIColors.print("\n--- Menu Result ---", color=ASCIIColors.color_bright_white)
+    # The result depends on how the menu was exited
+    if isinstance(result, list):
+        ASCIIColors.print(f"Multi-select returned: {result}", color=ASCIIColors.color_green)
+    elif result is not None:
+        ASCIIColors.print(f"Single-select returned: {result}", color=ASCIIColors.color_cyan)
+    else:
+        ASCIIColors.print("Menu exited (Quit/Back/Execute mode completed).", color=ASCIIColors.color_yellow)
+
+    # You can also access input values after the menu runs
+    # Find the input item (assuming its text is unique for demo)
+    input_item = next((item for item in root_menu.items if item.is_input and "Enter Name" in item.text), None)
+    if input_item:
+        ASCIIColors.print(f"Name entered was: '{input_item.input_value}'", color=ASCIIColors.color_magenta)
 
     # --- Prompt/Confirm Demo ---
     print("\n--- Prompt/Confirm Demo ---")

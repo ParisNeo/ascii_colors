@@ -19,11 +19,14 @@
 ## Complete logging system fully compatible with python logging library
 ![](assets/logging.png)
 
-## Full Menu mangement system
+## Full Menu management system
 ![](assets/ascii_menu.gif)
 
 ## TQDM like colorful progressbars
 ![](assets/ascii_progress_animation.gif)
+
+## User interaction utilities
+![](assets/confirm_prompt.png)
 
 ---
 
@@ -31,10 +34,11 @@
 
 *   🎨 **Dual Approach:** Seamlessly switch between simple, direct color printing for immediate feedback and a powerful, structured logging system for application events.
 *   🪵 **Logging Powerhouse:** Get instantly colored, leveled console logs (`stderr` default) with `basicConfig`. Easily configure file logging, JSON output, log rotation, custom formats, and context injection. Features a **`logging`-compatible API** (`getLogger`, `basicConfig`, Handlers) for painless adoption.
-*   📊 **Integrated Progress Bars:** Display `tqdm`-like progress bars for loops or tasks with customizable styles and colors, directly integrated.
-*   🖱️ **Interactive Menus:** Build intuitive, visually styled command-line menus with arrow-key navigation, submenus, and action execution.
+*   📊 **Integrated Progress Bars:** Display `tqdm`-like progress bars for loops or tasks with customizable styles (`fill`, `blocks`, `line`, `emoji`) and colors, directly integrated.
+*   🖱️ **Interactive Menus:** Build intuitive, visually styled command-line menus with arrow-key navigation, different selection modes (`execute`, `select_single`, `select_multiple`), filtering, inline input fields, help text, and submenus.
+*   🤝 **User Interaction:** Easily prompt users for text input (with optional hidden input for passwords) and ask for yes/no confirmation using `prompt()` and `confirm()`.
 *   ⚙️ **Utilities Included:** Comes with `execute_with_animation` (console spinner), `highlight` (text emphasis), `multicolor` (inline colored text), and `trace_exception` (easy error logging).
-*   🚀 **Simplify Your Stack:** Reduce project dependencies and complexity by using one library for colors, logging, progress bars, and menus.
+*   🚀 **Simplify Your Stack:** Reduce project dependencies and complexity by using one library for colors, logging, progress bars, menus, and basic user interaction.
 *   ✅ **Effortless Integration:** Use the familiar `import ascii_colors as logging` pattern or the native `ASCIIColors` API. Direct print methods remain independent for simple use cases.
 
 ---
@@ -44,6 +48,7 @@
 ```bash
 pip install ascii_colors
 ```
+*(Optional: For accurate wide-character support (like emojis) in ProgressBar, install `wcwidth`: `pip install wcwidth`)*
 
 ---
 
@@ -51,10 +56,10 @@ pip install ascii_colors
 
 Understanding this difference is fundamental:
 
-1.  **Direct Print Methods (`ASCIIColors.red`, `print`, `bold`, `bg_red`, etc.):**
-    *   **Mechanism:** Use Python's `print()` to **directly** output strings with specified ANSI colors/styles to a stream (default: `sys.stdout`).
+1.  **Direct Print Methods (`ASCIIColors.red`, `print`, `bold`, `bg_red`, `prompt`, `confirm`, etc.):**
+    *   **Mechanism:** Use Python's `print()` (or `input`/`getpass`) to **directly** interact with the terminal (default: `sys.stdout`/`stdin`). Outputs strings with specified ANSI colors/styles.
     *   **Scope:** **Completely bypasses** the logging system. Levels, Handlers, Formatters, Context are **ignored**.
-    *   **Use Case:** Ideal for immediate visual feedback, status messages, banners, prompts, or decorative output where structured logging features aren't necessary.
+    *   **Use Case:** Ideal for immediate visual feedback, status messages, banners, prompts, user input/confirmation, menus, progress bars, animations, or decorative output where structured logging features aren't necessary.
 
 2.  **Logging System (`basicConfig`, `getLogger`, `logger.info`, `ASCIIColors.info`, Handlers, Formatters):**
     *   **Mechanism:** Creates structured log records, filters them by level, formats them into strings using `Formatters`, and dispatches them via `Handlers` to destinations (console, file, etc.). Mimics Python's standard `logging` module.
@@ -62,7 +67,7 @@ Understanding this difference is fundamental:
     *   **Interaction:** Use `import ascii_colors as logging` (recommended) or `ASCIIColors.info()` methods. Both control the *same* global logging state.
     *   **Use Case:** Best for application logs, debugging, tracing events, audit trails – any scenario needing structured, configurable, and routable output.
 
-*Utility Interactions:* `highlight`, `multicolor`, `execute_with_animation`, and `Menu` use **Direct Printing** for their visual output. `trace_exception` uses the **Logging System**.
+*Utility Interactions:* `highlight`, `multicolor`, `execute_with_animation`, `Menu`, `ProgressBar`, `confirm`, and `prompt` use **Direct Printing** for their visual output/interaction. `trace_exception` uses the **Logging System**.
 
 ---
 
@@ -131,8 +136,8 @@ Access these as `ASCIIColors.<constant_name>`:
     *   `style_strikethrough`
 *   **Foreground (Regular):** `color_black`, `color_red`, `color_green`, `color_yellow`, `color_blue`, `color_magenta`, `color_cyan`, `color_white`, `color_orange` (256-color)
 *   **Foreground (Bright):** `color_bright_black` (gray), `color_bright_red`, `color_bright_green`, `color_bright_yellow`, `color_bright_blue`, `color_bright_magenta`, `color_bright_cyan`, `color_bright_white`
-*   **Background (Regular):** `bg_black`, `bg_red`, `bg_green`, `bg_yellow`, `bg_blue`, `bg_magenta`, `bg_cyan`, `bg_white`, `bg_orange` (256-color)
-*   **Background (Bright):** `bg_bright_black` (gray), `bg_bright_red`, `bg_bright_green`, `bg_bright_yellow`, `bg_bright_blue`, `bg_bright_magenta`, `bg_bright_cyan`, `bg_bright_white`
+*   **Background (Regular):** `color_bg_black`, `color_bg_red`, `color_bg_green`, `color_bg_yellow`, `color_bg_blue`, `color_bg_magenta`, `color_bg_cyan`, `color_bg_white`, `color_bg_orange` (256-color)
+*   **Background (Bright):** `color_bg_bright_black` (gray), `color_bg_bright_red`, `color_bg_bright_green`, `color_bg_bright_yellow`, `color_bg_bright_blue`, `color_bg_bright_magenta`, `color_bg_bright_cyan`, `color_bg_bright_white`
 
 *(Note: Rendering depends on terminal emulator capabilities.)*
 
@@ -328,25 +333,25 @@ Use these within `format` strings (`fmt` parameter):
 *   **`%` Style (Default):**
     *   `%(asctime)s`: Human-readable time (configured by `datefmt`).
     *   `%(created)f`: Time of creation (float, `time.time()`).
-    *   `%(filename)s`: Filename part of pathname.
-    *   `%(funcName)s`: Name of function containing the log call.
+    *   `%(filename)s`: Filename part of pathname. Requires `include_source=True`.
+    *   `%(funcName)s`: Name of function containing the log call. Requires `include_source=True`.
     *   `%(levelname)s`: Text logging level ('DEBUG', 'INFO', etc.).
     *   `%(levelno)s`: Numeric logging level (10, 20, etc.).
     *   `%(lineno)d`: Line number where log call occurs. Requires `include_source=True`.
     *   `%(message)s`: The logged message itself.
-    *   `%(module)s`: Module name (filename without extension).
+    *   `%(module)s`: Module name (filename without extension). Requires `include_source=True`.
     *   `%(msecs)d`: Millisecond portion of timestamp.
     *   `%(name)s`: Name of the logger used.
     *   `%(pathname)s`: Full path to the source file. Requires `include_source=True`.
     *   `%(process)d`: Process ID.
-    *   `%(processName)s`: Process name (usually 'MainProcess').
+    *   `%(processName)s`: Process name (usually Python thread name).
     *   `%(relativeCreated)d`: Time in milliseconds since logger initialized.
     *   `%(thread)d`: Thread ID.
     *   `%(threadName)s`: Thread name.
     *   `%(<custom_key>)s`: Any key passed via `extra={...}` or context.
 *   **`{}` Style:** Use the same names within braces, e.g., `{asctime}`, `{levelname}`, `{name}`, `{message}`, `{filename}`, `{lineno}`, `{funcName}`, `{custom_key}`.
 
-**Note:** Retrieving `filename`, `pathname`, `lineno`, `funcName` requires setting `include_source=True` on the `Formatter`, which adds performance overhead due to stack inspection.
+**Note:** Retrieving `filename`, `pathname`, `lineno`, `funcName`, `module` requires setting `include_source=True` on the `Formatter`, which adds performance overhead due to stack inspection.
 
 ### JSON Formatter (`JSONFormatter`)
 
@@ -360,25 +365,26 @@ log_file = Path("audit.jsonl")
 
 # Configure JSON Formatter
 json_formatter = logging.JSONFormatter(
-    # Option 1: Select standard fields to include
-    # include_fields=["asctime", "levelname", "name", "message", "user_id", "request_id"],
-    # Option 2: Define exact output structure with fmt dict (values are format strings)
+    # Option 1: Define exact output structure with fmt dict (values are format strings)
     fmt={
-        "timestamp": "%(asctime)s",
-        "level": "%(levelname)s",
-        "logger": "%(name)s",
-        "details": "%(message)s",
-        "context": { # Nested context example
-            "req": "%(request_id)s",
+        "ts": "%(asctime)s",
+        "lvl": "%(levelname)s",
+        "log": "%(name)s",
+        "msg": "%(message)s",
+        "ctx": { # Nested context example
+            "request": "%(request_id)s",
             "user": "%(user_id)s",
             "file": "%(filename)s" # Requires include_source=True if using this
-        }
+        },
+        "exc_info": "%(exc_info)s" # Include formatted exception string if present
     },
+    # Option 2: Alternatively, select standard fields to include
+    # include_fields=["asctime", "levelname", "name", "message", "user_id", "request_id", "exc_info", "exc_type"],
     datefmt="iso",         # Use ISO 8601 timestamps
     style='%',             # Style for resolving format strings in fmt dict
     json_ensure_ascii=False, # Allow UTF-8 characters
     json_indent=None,      # Set to integer (e.g., 2) for pretty-printing (usually None for log files)
-    json_sort_keys=True,   # Sort keys alphabetically
+    json_sort_keys=False,  # Preserve order from fmt dict if possible
     include_source=True    # Needed if format strings reference source info
 )
 
@@ -389,7 +395,14 @@ json_handler.setFormatter(json_formatter)
 logging.basicConfig(level=logging.INFO, handlers=[json_handler], force=True) # Use only this handler
 
 logger = logging.getLogger("API")
-logger.info("User authentication successful.", extra={"user_id": "usr_123", "request_id": "req_abc"})
+try:
+    1 / 0
+except Exception as e:
+     # Pass context via 'extra' and include exception info
+     logger.error("Processing failed for request.",
+                  extra={"user_id": "usr_456", "request_id": "req_xyz"},
+                  exc_info=True) # Logs the exception details
+
 # Log file 'audit.jsonl' will contain a JSON object per line (JSON Lines format)
 ```
 
@@ -437,7 +450,7 @@ Enrich logs automatically with contextual data relevant to the current thread or
 3.  **Log:** Messages logged within the context scope will include the values.
 
 ```python
-from ascii_colors import ASCIIColors, Formatter, ConsoleHandler, getLogger
+from ascii_colors import ASCIIColors, Formatter, ConsoleHandler, getLogger, INFO
 import threading, time, sys
 
 # Formatter includes context keys 'req_id' and 'user'
@@ -480,12 +493,13 @@ Display `tqdm`-like progress indicators. Uses **Direct Printing**.
 *   `desc`: String description prefix.
 *   `unit`: Label for iterations (default: "it").
 *   `ncols`: Fixed width for the entire bar; `None` for auto-detect.
-*   `bar_format`: Custom format string. Use placeholders like `{l_bar}`, `{bar}`, `{r_bar}`, `{n_fmt}`, `{total_fmt}`, `{percentage}`, `{elapsed}`, `{remaining}`, `{rate_fmt}`.
+*   `bar_format`: Custom format string. Use placeholders like `{l_bar}`, `{bar}`, `{r_bar}`, `{n_fmt}`, `{total_fmt}`, `{percentage}`, `{elapsed}`, `{remaining}`, `{rate_fmt}`. For indeterminate bars (no total), only `{l_bar}`, `{bar}`, `{n}`, `{elapsed}`, `{rate_fmt}`, `{unit}` are reliably substituted.
 *   `leave`: Keep the completed bar on screen (`True`) or clear it (`False`). Default: `True`.
 *   `mininterval`: Minimum time in seconds between display updates. Default: `0.1`.
 *   `color`, `style`, `background`: `ASCIIColors` constants for bar/text styling.
-*   `progress_char`, `empty_char`: Characters for the filled/empty parts of the bar.
-*   `bar_style`: `'fill'` (default, solid block) or `'blocks'` (uses Unicode block characters for smoother progress).
+*   `bar_style`: `'fill'` (default, solid block), `'blocks'` (smoother Unicode blocks), `'line'` (growing line), `'emoji'` (uses custom chars).
+*   `progress_char`, `empty_char`: Characters for filled/empty parts. Ignored for `'emoji'`. Defaults vary by `bar_style`.
+*   `emoji_fill`, `emoji_empty`: Characters used for `'emoji'` style (defaults: 😊, 😞).
 
 **Examples:**
 
@@ -493,86 +507,136 @@ Display `tqdm`-like progress indicators. Uses **Direct Printing**.
 from ascii_colors import ProgressBar, ASCIIColors
 import time
 
-# --- Example 1: Wrapping an iterable ---
+# --- Example 1: Wrapping an iterable ('fill' style) ---
 items = range(200)
 print("Wrapping an iterable:")
 for item in ProgressBar(items, desc="Processing", unit=" tasks", color=ASCIIColors.color_green):
     time.sleep(0.01)
 
-# --- Example 2: Manual control with context manager and styling ---
-print("\nManual control:")
+# --- Example 2: Manual control, 'blocks' style ---
+print("\nManual control ('blocks' style):")
 total_size = 500
 with ProgressBar(total=total_size, desc="Downloading", unit=" KB",
                  color=ASCIIColors.color_bright_blue, style=ASCIIColors.style_bold,
-                 progress_char="█", empty_char="░", bar_style="fill",
+                 bar_style="blocks", # Use smooth block style
                  mininterval=0.05) as pbar:
     for i in range(total_size):
         time.sleep(0.005)
         pbar.update(1) # Increment progress
         if i == total_size // 2:
             pbar.set_description("Half done...") # Update description dynamically
+
+# --- Example 3: 'line' style ---
+print("\n'line' style:")
+for item in ProgressBar(range(100), desc="Line Task", bar_style='line', color=ASCIIColors.color_magenta):
+     time.sleep(0.015)
+
+# --- Example 4: 'emoji' style ---
+print("\n'emoji' style:")
+for item in ProgressBar(range(60), desc="Rockets", bar_style='emoji',
+                        emoji_fill="🚀", emoji_empty="🌑"):
+    time.sleep(0.03)
+
+# --- Example 5: Indeterminate (no total) ---
+print("\nIndeterminate style:")
+with ProgressBar(desc="Waiting...", color=ASCIIColors.color_yellow) as pbar:
+     for _ in range(5):
+         time.sleep(0.5)
+         pbar.update(10) # Can still track counts
 ```
 
 ---
 
 ## 🖱️ Interactive Menu (`Menu`)
 
-Build styled CLI menus with arrow-key navigation. Uses **Direct Printing**.
+Build styled CLI menus with arrow-key navigation, different modes, filtering, and input. Uses **Direct Printing**.
 
-**Key Parameters (`Menu.__init__`):**
+**Key `Menu` Parameters:**
 
-*   `title`: Menu title text.
-*   `parent`: Link to the parent `Menu` instance for 'Back' navigation.
+*   `title`: Menu title.
+*   `parent`: Link to parent `Menu` for 'Back' navigation.
+*   `mode`: `'execute'` (run actions), `'select_single'` (return one value), `'select_multiple'` (return list of values). Default: `'execute'`.
 *   `clear_screen_on_run`: Clear terminal before showing (`True`).
-*   `prompt_text`: Informational text below options.
-*   `title_color`, `title_style`: Styling for the title.
-*   `item_color`, `item_style`: Styling for non-selected items.
-*   `selected_color`, `selected_background`, `selected_style`: Styling for the highlighted item.
-*   `selected_prefix`, `unselected_prefix`: Prefixes shown before items (e.g., `> ` vs `  `).
-*   `prompt_color`, `error_color`: Styling for prompt/error messages.
-*   `hide_cursor`: Attempt to hide the cursor during menu interaction (`True`).
+*   `hide_cursor`: Attempt to hide cursor during interaction (`True`).
+*   `enable_filtering`: Allow typing to filter items (`False`).
+*   `help_area_height`: Number of lines reserved below menu for help text (`0`).
+*   Styling: `title_color`, `item_color`, `selected_color`, `selected_background`, `prompt_color`, `error_color`, `filter_color`, `help_color`, etc.
+*   Prefixes: `selected_prefix`, `unselected_prefix`, `checkbox_selected`, etc.
 
-**Building and Running:**
+**Adding Items:**
 
-1.  Create `Menu` instances (`main_menu = Menu(...)`).
-2.  Link submenus: `sub_menu = Menu(..., parent=main_menu)`.
-3.  Add items:
-    *   `main_menu.add_action("Do Thing", my_function)`
-    *   `main_menu.add_submenu("Open Settings", settings_menu)`
-4.  Run the main menu: `main_menu.run()`.
+*   `.add_action(text, function, *, value=None, exit_on_success=False, item_color=None, help_text=None, disabled=False)`
+*   `.add_submenu(text, submenu_instance, *, value=None, item_color=None, help_text=None, disabled=False)`
+*   `.add_choice(text, *, value=None, selected=False, item_color=None, help_text=None, disabled=False)`: For use in `select_single`/`select_multiple` modes.
+*   `.add_input(text, *, initial_value="", placeholder="{input}", value=None, item_color=None, help_text=None, disabled=False)`: Inline text input.
+*   `.add_separator(text=None)`
 
-**Navigation:** Use **Up/Down Arrows** to move selection, **Enter** to activate item, **Ctrl+C** to Quit (or go Back in submenu).
+**Navigation & Interaction:**
+
+*   **Arrows Up/Down:** Move selection.
+*   **Enter:**
+    *   Execute action or enter submenu (in `execute` mode).
+    *   Select item and exit menu (in `select_single` mode).
+    *   Toggle item selection (in `select_multiple` mode - see Note below).
+    *   Start editing input field.
+*   **Space:** Toggle item selection (in `select_multiple` mode).
+*   **Typing (if `enable_filtering=True`):** Filters the list of items. `Backspace` removes characters from filter.
+*   **Ctrl+C:** Quit main menu, or go back in submenu.
+*   **Input Field Editing:** Use `Left`/`Right`/`Backspace`/`Printable Keys`. `Enter`/`Escape` finishes editing.
+
+*Note on Multi-Select Enter:* By default, Enter toggles items in `select_multiple` mode. If you add an `action` to a choice in multi-select, Enter will *execute* that action instead of toggling. Use Spacebar for toggling in those cases.
 
 **Example:**
 
 ```python
-from ascii_colors import Menu, ASCIIColors, trace_exception
-import platform
+from ascii_colors import Menu, MenuItem, ASCIIColors
+import platform, time
 
-def show_platform(): ASCIIColors.info(f"Platform: {platform.system()}")
-def fail_action(): raise ValueError("Something went wrong!")
+def action_ok(): ASCIIColors.green("Action OK!")
+def action_exit_success(): ASCIIColors.success("Exiting Menu!"); return True # Causes menu exit
 
-# --- Create Menus ---
-root = Menu("CLI Tool Menu", title_color=ASCIIColors.color_bright_green)
-tools = Menu("Tools", parent=root, item_color=ASCIIColors.color_cyan)
-settings = Menu("Settings", parent=root, item_color=ASCIIColors.color_yellow)
+# --- Menus ---
+root = Menu("Unified CLI Menu", enable_filtering=True, help_area_height=2)
+single_sel = Menu("Select Format", parent=root, mode='select_single')
+multi_sel = Menu("Select Features", parent=root, mode='select_multiple')
 
-# --- Add Items to Root ---
-root.add_action("Show Platform Info", show_platform)
-root.add_submenu("Tools Menu", tools)
-root.add_submenu("Settings Menu", settings)
-root.add_action("Test Failure", fail_action)
+# --- Root Items ---
+root.add_action("Show Platform", lambda: ASCIIColors.info(f"OS: {platform.system()}"),
+                help_text="Display the current operating system.")
+root.add_submenu("Choose Format", single_sel, help_text="Select one output format.")
+root.add_submenu("Configure Features", multi_sel, help_text="Toggle multiple features (Spacebar).")
+root.add_action("Action That Exits", action_exit_success, exit_on_success=True,
+                help_text="This action will close the menu if it succeeds.")
+root.add_separator()
+root.add_input("Enter Username: ", initial_value="guest", help_text="Type a username here.")
+root.add_action("Disabled Action", action_ok, disabled=True)
 
-# --- Add Items to Submenus ---
-tools.add_action("Run Diagnostics", lambda: print("Running diagnostics..."))
-tools.add_action("Check Network", lambda: print("Checking network..."))
-settings.add_action("Configure Theme", lambda: print("Theme configured."))
-settings.add_action("Set User Profile", lambda: print("Profile set."))
+# --- Submenu Items ---
+single_sel.add_choice("Text", value="txt", help_text="Plain text format.")
+single_sel.add_choice("JSON", value="json", help_text="JSON format.")
+single_sel.add_choice("YAML", value="yaml", disabled=True)
 
-# --- Run (Requires interactive terminal) ---
-print("\nStarting interactive menu (use Arrows, Enter, Ctrl+C)...")
-# root.run() # Uncomment to run interactively
-ASCIIColors.print("(Menu run commented out for non-interactive README)")
+multi_sel.add_choice("Verbose Logging", value="VERBOSE", selected=True)
+multi_sel.add_choice("Auto Save", value="AUTOSAVE")
+multi_sel.add_choice("Notifications", value="NOTIFY", selected=True)
+
+# --- Run ---
+ASCIIColors.print("\nStarting interactive menu demo (Arrows, Enter, Space, Type to filter, Ctrl+C)...\n", color=ASCIIColors.color_yellow)
+result = root.run() # Run the main menu
+
+ASCIIColors.print("\n--- Menu Result ---", color=ASCIIColors.color_bright_white)
+if isinstance(result, list):
+    ASCIIColors.print(f"Multi-select returned: {result}", color=ASCIIColors.color_green)
+elif result is not None:
+    ASCIIColors.print(f"Single-select or Exit Action returned: {result}", color=ASCIIColors.color_cyan)
+else:
+    ASCIIColors.print("Menu exited (Quit/Back/Execute mode completed).", color=ASCIIColors.color_yellow)
+
+# Access input value after run (find the item by text or other means)
+input_item = next((item for item in root.items if item.is_input), None)
+if input_item:
+    ASCIIColors.print(f"Username entered was: '{input_item.input_value}'", color=ASCIIColors.color_magenta)
+
 ```
 
 ---
@@ -630,7 +694,7 @@ except Exception as e:
 ```
 
 ---
-**b) User Interaction (`confirm` / `prompt`)**
+## 🤝 User Interaction (`confirm` / `prompt`)
 
 Easily get confirmations or text input from the user directly in the terminal. These methods use **Direct Printing** for the prompts.
 
@@ -641,10 +705,10 @@ Easily get confirmations or text input from the user directly in the terminal. T
     *   `default_yes=None`: Enter is invalid (`[y/n]`).
     *   Returns `True` for Yes, `False` for No (or Ctrl+C).
 
-*   **`ASCIIColors.prompt(prompt_text, color=..., style=..., ...)`**: Displays a styled prompt and reads a line of text.
+*   **`ASCIIColors.prompt(prompt_text, color=..., style=..., hide_input=False, ...)`**: Displays a styled prompt and reads a line of text.
     *   Returns the user's input string.
     *   Returns an empty string if cancelled with Ctrl+C.
-    *   If hide_input=True, don't show the input text (useful for passwords and keys).
+    *   `hide_input=True`: Don't echo input characters (uses `getpass`).
 
 ```python
 from ascii_colors import ASCIIColors
@@ -659,12 +723,13 @@ else:
 proceed = ASCIIColors.confirm("Continue with installation?", default_yes=True)
 
 
-# --- Prompt Example ---
+# --- Prompt Examples ---
+name = ASCIIColors.prompt("Enter your name: ", color=ASCIIColors.color_cyan)
 api_key = ASCIIColors.prompt(
     "Enter your API key: ",
-    color=ASCIIColors.color_cyan,
+    color=ASCIIColors.color_yellow,
     style=ASCIIColors.style_bold,
-    hide_input=True
+    hide_input=True # Hide the input
 )
 if api_key:
     print("API Key received.")
