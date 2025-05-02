@@ -2509,13 +2509,13 @@ class Menu:
     Supports arrow-key navigation, different selection modes (execute, single, multiple),
     input fields, filtering, and more, using ASCIIColors for styling.
     """
-    # ... (Keep the __init__ method exactly as it was in the previous good response) ...
     def __init__(
         self,
         title: str,
         parent: Optional['Menu'] = None,
         mode: str = 'execute', # 'execute', 'select_single', 'select_multiple'
         clear_screen_on_run: bool = True,
+        epilog_text: Optional[str] = None, # NEW: Text to display after title
         hide_cursor: bool = True,
         enable_filtering: bool = False,
         help_area_height: int = 0, # Number of lines reserved for help text
@@ -2539,6 +2539,8 @@ class Menu:
         prompt_color: str = ASCIIColors.color_green,
         error_color: str = ASCIIColors.color_red,
         filter_color: str = ASCIIColors.color_magenta,
+        epilog_color: Optional[str] = None, # NEW: Color for epilog text
+        epilog_style: str = "",             # NEW: Style for epilog text
         help_color: str = ASCIIColors.color_yellow,
         checkbox_selected: str = "[x]",
         checkbox_unselected: str = "[ ]",
@@ -2554,6 +2556,7 @@ class Menu:
         self.parent = parent
         self.mode = mode.lower()
         self.items: List[MenuItem] = []
+        self.epilog_text: Optional[str] = epilog_text # Store epilog text
         self._original_items: Optional[List[MenuItem]] = None # For resetting filter
         self.clear_screen_on_run = clear_screen_on_run
         self.hide_cursor = hide_cursor
@@ -2578,6 +2581,7 @@ class Menu:
             "item_style_only": item_style, "item_color_only": item_color,
             "selected_highlight": selected_style + selected_color + selected_background,
             "disabled": (disabled_style + disabled_color) if disabled_color else "",
+            "epilog": (epilog_style + (epilog_color if epilog_color else item_color)), # NEW: Style for epilog
             "separator": separator_style if separator_style else "", "prompt": prompt_color,
             "error": error_color, "filter": filter_color, "help": help_color,
             "input_cursor": input_cursor_color,
@@ -2594,7 +2598,6 @@ class Menu:
 
     # --- Methods to Add Items ---
 
-    # ... (Keep add_action, add_submenu, add_choice as they were) ...
     def add_action(self, text: str, action: Callable[[], Any], *, # Use Callable
                    value: Any = None, exit_on_success: bool = False,
                    item_color: Optional[str] = None, help_text: Optional[str] = None,
@@ -2658,9 +2661,8 @@ class Menu:
             # Call the existing add_choice method for each item
             # This reuses the logic for creating the MenuItem instance
             self.add_choice(text=text, value=value)
-        return self # Allow chaining like other add_* methods    
+        return self # Allow chaining like other add_* methods
 
-    # **CORRECTED add_input**
     def add_input(self, text: str, *, initial_value: str = "", placeholder: str = "{input}",
                   value: Any = None, item_color: Optional[str] = None,
                   help_text: Optional[str] = None, disabled: bool = False) -> 'Menu':
@@ -2669,20 +2671,18 @@ class Menu:
         self.items.append(MenuItem(
             text=display_text, item_type='action', target=None, value=value,
             is_input=True,
-            initial_input=initial_value, # **Pass the correct keyword argument**
+            initial_input=initial_value,
             # Note: MenuItem.__init__ assigns initial_input to self.input_value internally
             custom_color=item_color, help_text=help_text, disabled=disabled
         ))
         return self
 
-    # ... (Keep add_separator as it was) ...
     def add_separator(self, text: Optional[str] = None) -> 'Menu':
         sep_text = text if text is not None else ("-" * 20)
         self.items.append(MenuItem(text=sep_text, item_type='separator', disabled=True))
         return self
 
     # --- Dynamic Updates ---
-    # ... (Keep set_items, refresh_display as they were) ...
     def set_items(self, new_items: List[MenuItem]):
         self.items = new_items
         self._original_items = list(new_items)
@@ -2694,7 +2694,6 @@ class Menu:
 
 
     # --- Internal Helpers ---
-    # ... (Keep _clear_screen, _set_cursor_visibility, _apply_filter as they were) ...
     def _clear_screen(self) -> None:
         if self.clear_screen_on_run and self.file == sys.stdout:
             command = 'cls' if platform.system().lower() == "windows" else 'clear'
@@ -2724,8 +2723,6 @@ class Menu:
 
 
     # --- Display and Input Handling ---
-    # ... (Keep _get_display_items, _display_menu, _handle_input as they were - they seemed logically correct before) ...
-    # Small correction in _get_display_items to use the potentially filtered self.items
     def _get_display_items(self) -> List[MenuItem]:
         # Start with current self.items (which might be filtered)
         display_list = list(self.items)
@@ -2755,7 +2752,6 @@ class Menu:
         display_list.extend(back_quit_confirm)
         return display_list
 
-    # _display_menu remains the same as the previous good version
     def _display_menu(self):
         self._clear_screen()
 
@@ -2766,6 +2762,12 @@ class Menu:
         ASCIIColors.print(self.title, color=self.styles['title'], style="", file=self.file)
         separator_line = "-" * len(strip_ansi(self.title))
         ASCIIColors.print(separator_line, color=self.styles['title'], style="", file=self.file)
+
+        # NEW: Display Epilog Text
+        if self.epilog_text:
+            # Print epilog with its specific style, then add a newline for separation
+            ASCIIColors.print(self.epilog_text, color=self.styles['epilog'], style="", file=self.file)
+            print(file=self.file) # Add blank line separator before items
 
         visible_item_indices = list(range(num_display_items))
 
@@ -2844,7 +2846,6 @@ class Menu:
         # Display Main Prompt
         ASCIIColors.print(f"\n{self.prompts['main']}", color=self.styles['prompt'], file=self.file)
 
-    # _handle_input remains the same as the previous good version
     def _handle_input(self, display_items: List[MenuItem]) -> bool:
         """Handles a single key press and updates menu state. Returns True to continue loop."""
         key = _get_key()
@@ -3031,7 +3032,6 @@ class Menu:
         return True # Continue loop by default
 
     # --- Main Run Method ---
-    # ... (Keep run method exactly as it was in the previous good response) ...
     def run(self) -> Any:
         if self.hide_cursor: self._set_cursor_visibility(False)
 
@@ -3053,6 +3053,10 @@ class Menu:
                     self._clear_screen()
                     ASCIIColors.print(self.title, color=self.styles['title'], file=self.file)
                     ASCIIColors.print("-" * len(strip_ansi(self.title)), color=self.styles['title'], file=self.file)
+                    # Also print epilog when empty if it exists
+                    if self.epilog_text:
+                         ASCIIColors.print(self.epilog_text, color=self.styles['epilog'], style="", file=self.file)
+                         print(file=self.file) # Separator line
                     ASCIIColors.print("\n(No items to display)", color=self.styles['disabled'], file=self.file)
                     filter_indicator = "_" if not self._is_editing_input else ""
                     if self.enable_filtering:
@@ -3092,8 +3096,7 @@ class Menu:
 
 
         return self._run_result
-
-
+    
 # =======================
 # TQDM style Progressbar
 # =======================
