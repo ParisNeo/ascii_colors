@@ -568,6 +568,7 @@ Build styled CLI menus with arrow-key navigation, different modes, filtering, an
 *   `.add_action(text, function, *, value=None, exit_on_success=False, item_color=None, help_text=None, disabled=False)`
 *   `.add_submenu(text, submenu_instance, *, value=None, item_color=None, help_text=None, disabled=False)`
 *   `.add_choice(text, *, value=None, selected=False, item_color=None, help_text=None, disabled=False)`: For use in `select_single`/`select_multiple` modes.
+*   `.add_choices(choices):` Adds multiple choice items from a list of `(text, value)` tuples. Convenient for `select_single`/`select_multiple` modes.
 *   `.add_input(text, *, initial_value="", placeholder="{input}", value=None, item_color=None, help_text=None, disabled=False)`: Inline text input.
 *   `.add_separator(text=None)`
 
@@ -612,13 +613,27 @@ root.add_input("Enter Username: ", initial_value="guest", help_text="Type a user
 root.add_action("Disabled Action", action_ok, disabled=True)
 
 # --- Submenu Items ---
-single_sel.add_choice("Text", value="txt", help_text="Plain text format.")
-single_sel.add_choice("JSON", value="json", help_text="JSON format.")
-single_sel.add_choice("YAML", value="yaml", disabled=True)
+# Using add_choices for single_sel
+single_sel.add_choices([
+    ("Text", "txt"),
+    ("JSON", "json"),
+    ("YAML", "yaml"), # Value defaults to "YAML"
+])
+# Add help text separately if needed after add_choices
+single_sel.items[0].help_text = "Plain text format."
+single_sel.items[1].help_text = "JSON format."
+single_sel.items[2].disabled = True # Disable YAML
 
-multi_sel.add_choice("Verbose Logging", value="VERBOSE", selected=True)
-multi_sel.add_choice("Auto Save", value="AUTOSAVE")
-multi_sel.add_choice("Notifications", value="NOTIFY", selected=True)
+# Using add_choices for multi_sel
+multi_sel.add_choices([
+    ("Verbose Logging", "VERBOSE"),
+    ("Auto Save", "AUTOSAVE"),
+    ("Notifications", "NOTIFY"),
+])
+# Set initial selection state after add_choices
+multi_sel.items[0].selected = True
+multi_sel.items[2].selected = True
+
 
 # --- Run ---
 ASCIIColors.print("\nStarting interactive menu demo (Arrows, Enter, Space, Type to filter, Ctrl+C)...\n", color=ASCIIColors.color_yellow)

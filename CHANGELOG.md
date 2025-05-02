@@ -5,7 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.10.1] - 2025-04-28
+## [0.11.1] - 2025-05-02
+
+### Added
+*   **`Menu.add_choices()`:** Added a convenience method to the `Menu` class to add multiple choice items from a list of (text, value) tuples, useful for select modes.
+
+## [0.11.0] - 2025-04-28
+
+*(No unique public changes noted compared to previous documented versions)*
 
 ### Added
 *   **`ASCIIColors.confirm()`:** Added a static utility method to ask yes/no questions interactively, handling defaults and input validation. Uses direct printing.
@@ -14,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 *   Added documentation for `confirm` and `prompt` to README, usage guide, and API reference.
 
 ### Changed
-* Now `add_action` can also receive an optional `item_color` to set the item color in the menu.
+*   Now `add_action` can also receive an optional `item_color` to set the item color in the menu.
 
 ## [0.10.0] - 2025-04-28
 
@@ -38,7 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 *   Improved cleanup logic in `if __name__ == "__main__"` block to attempt removal of specific test files.
 
-## [0.9.0] - 2025-24-27
+## [0.9.0] - 2025-04-27  <!-- Corrected date typo -->
 
 ### Added
 *   **`ProgressBar`:** Introduced a thread-safe, customizable progress bar utility (`ascii_colors.ProgressBar`) mimicking the `tqdm` interface (iterable wrapping, context manager). Supports ANSI colors, styles, and different bar formats using direct terminal printing.
@@ -118,4 +125,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.7.6] - Previous Version Date *(Example)*
 
-Standard coloring andsimple logging
+Standard coloring and simple logging. *(Implied baseline state before 0.8.0)*

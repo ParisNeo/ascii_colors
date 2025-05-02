@@ -2630,6 +2630,36 @@ class Menu:
         ))
         return self
 
+    # --- NEW METHOD ---
+    def add_choices(self, choices: List[Tuple[str, Any]]) -> 'Menu':
+        """
+        Adds multiple choice items to the menu from a list of (text, value) tuples.
+
+        This is a convenience method for efficiently adding multiple items suitable for
+        'select_single' or 'select_multiple' modes, where each item has a
+        display text and an associated value returned upon selection.
+
+        Args:
+            choices: A list of tuples, where each tuple is expected to be
+                     in the format `(display_text: str, item_value: Any)`.
+
+        Returns:
+            The Menu instance itself, allowing for method chaining.
+
+        Raises:
+            ValueError: If items in the `choices` list are not tuples of length 2.
+        """
+        for choice_item in choices:
+            # Validate the structure of each item in the list
+            if not isinstance(choice_item, tuple) or len(choice_item) != 2:
+                raise ValueError(f"Items in 'choices' must be tuples of (text, value). Found: {choice_item!r}")
+
+            text, value = choice_item
+            # Call the existing add_choice method for each item
+            # This reuses the logic for creating the MenuItem instance
+            self.add_choice(text=text, value=value)
+        return self # Allow chaining like other add_* methods    
+
     # **CORRECTED add_input**
     def add_input(self, text: str, *, initial_value: str = "", placeholder: str = "{input}",
                   value: Any = None, item_color: Optional[str] = None,
