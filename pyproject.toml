@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ascii_colors"
-version = "0.11.2"
+version = "0.11.3"
 description = "A Python library for rich terminal output with advanced logging features."
 readme = "README.md" # Specifies the file for the long description and content type
 license = "Apache-2.0"
@@ -27,7 +27,7 @@ authors = [
 ]
 classifiers = [
     # Status
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     # Audience
     "Intended Audience :: Developers",
     # Environment
@@ -50,7 +50,7 @@ classifiers = [
 ]
 
 # No runtime dependencies needed for core functionality
-dependencies = []
+dependencies = ["wcwidth"]
 
 [project.urls]
 Homepage = "https://github.com/ParisNeo/ascii_colors"
