@@ -49,7 +49,7 @@ from enum import IntEnum
 from pathlib import Path
 from threading import Lock
 from typing import (Any, Callable, Dict, List, Optional, TextIO, Tuple, Type,
-                    Union, cast, Text, TypeVar, ContextManager, IO, Iterable, Sized)
+                    Union, cast, Text, TypeVar, ContextManager, IO, Iterable, Iterator, Sized)
 
 import math
 import re
@@ -62,7 +62,11 @@ else: # Unix-like (Linux, macOS)
     import termios
     import tty
 import getpass
+
 # --- Helper functions ---
+
+# Determine the package directory to correctly identify internal frames
+_PACKAGE_DIR = os.path.dirname(os.path.normcase(os.path.abspath(__file__)))
 
 # --- Helper for single key input ---
 
@@ -362,8 +366,12 @@ class Formatter:
                 while frame and depth < 20:
                     fname = frame.f_code.co_filename
                     func = frame.f_code.co_name
+                    
                     # Heuristic to identify internal logging frames
-                    is_internal_file = "ascii_colors" in Path(fname).parts or Path(fname).name == "__init__.py"
+                    # Use exact path match/prefix against the package directory
+                    normalized_fname = os.path.normcase(os.path.abspath(fname))
+                    is_internal_file = normalized_fname.startswith(_PACKAGE_DIR)
+                    
                     is_internal_func = func in (
                         '_log','format','handle','emit','debug','info','warning','error','critical','exception',
                         'log','trace_exception','basicConfig','getLogger','_AsciiLoggerAdapter'
@@ -635,8 +643,11 @@ class JSONFormatter(Formatter):
                  frame = inspect.currentframe(); depth = 0
                  while frame and depth < 20:
                      fname = frame.f_code.co_filename; func = frame.f_code.co_name
+                     
                      # Check if frame is from this logging module itself
-                     is_internal_file = "ascii_colors" in Path(fname).parts or Path(fname).name == "__init__.py"
+                     normalized_fname = os.path.normcase(os.path.abspath(fname))
+                     is_internal_file = normalized_fname.startswith(_PACKAGE_DIR)
+                     
                      is_internal_func = func in (
                          '_log','format','handle','emit','debug','info','warning','error','critical','exception',
                          'log','trace_exception','basicConfig','getLogger','_AsciiLoggerAdapter', 'format_exception' # Added JSONFormatter methods
@@ -1232,11 +1243,11 @@ class RotatingFileHandler(FileHandler):
 
     def emit(self, level: LogLevel, formatted_message: str) -> None:
         """
-        Writes the log record to the file and then performs rotation if necessary.
+        Writes the log record to the file and performs rotation if necessary (predictively).
 
-        First, it calls the base class `emit` to write the message.
-        Then, it checks if rotation conditions are met (`should_rotate`) and,
-        if so, calls `do_rollover`.
+        It checks if the message (plus newline) would cause the file to exceed `maxBytes`.
+        If so, it calls `do_rollover` *before* writing to start a fresh log file.
+        Then, it calls the base class `emit` to write the message.
 
         Args:
             level: The severity level (passed to base emit, not used directly here).
@@ -1247,45 +1258,46 @@ class RotatingFileHandler(FileHandler):
             return
 
         try:
-            # 1. Write the message using the base class emit
-            super().emit(level, formatted_message) # This handles opening if delayed
+            # Calculate message size in bytes (including newline)
+            msg_content = formatted_message + "\n"
+            msg_size = len(msg_content.encode(self.encoding or 'utf-8'))
 
-            # 2. Check if rotation is needed *after* writing
-            if self.should_rotate():
-                # Rotation check might fail, handle potential errors
+            # Check if rotation is needed *before* writing (predictive rotation)
+            if self.should_rotate(msg_size):
                 self.do_rollover()
 
         except Exception as e:
-            self.handle_error(f"Error during emit or rotation check/rollover for {self.filename}: {e}")
-            # Consider if handler should close on such errors
-            # self.close()
+            self.handle_error(f"Error during rotation check/rollover for {self.filename}: {e}")
+            # Continue to try writing even if rotation check failed?
+
+        # Write the message using the base class emit
+        super().emit(level, formatted_message)
 
 
-    def should_rotate(self) -> bool:
+    def should_rotate(self, message_size: int = 0) -> bool:
         """
-        Checks if the log file needs to be rotated based on its current size.
+        Checks if the log file needs to be rotated based on its current size and the new message size.
 
         Returns:
-            True if `maxBytes > 0` and the current log file size is greater than
+            True if `maxBytes > 0` and the current log file size + message_size is greater than
             or equal to `maxBytes`. False otherwise, or if the file doesn't exist.
         """
         # Note: Lock is acquired by the calling emit() -> handle() methods.
         if self.closed or self.maxBytes <= 0:
             return False
 
-        # We need to check the actual file size on disk, as the internal stream
-        # might have been closed by do_rollover or might not reflect the final size yet.
+        # We need to check the actual file size on disk
         try:
             if self.filename.exists():
                 # Get file size from the filesystem
                 file_size = self.filename.stat().st_size
-                return file_size >= self.maxBytes
+                return (file_size + message_size) >= self.maxBytes
         except OSError as e:
             # Handle potential errors accessing file stats
             self.handle_error(f"Failed to get size of {self.filename} for rotation check: {e}")
             return False # Cannot determine size, so don't rotate
 
-        # File doesn't exist, no need to rotate
+        # File doesn't exist, no need to rotate (unless msg itself > maxBytes? Standard logic usually says no)
         return False
 
 
@@ -1304,62 +1316,43 @@ class RotatingFileHandler(FileHandler):
         # We have the lock ensuring emit isn't writing while we rotate.
 
         # 1. Close the current stream BEFORE filesystem operations
-        stream_closed_by_us = False
         if self._stream and not getattr(self._stream, 'closed', True):
             try:
                 # Flush just in case, then close
                 self._stream.flush()
                 self._stream.close()
-                stream_closed_by_us = True # We closed it for rotation
             except Exception as e:
                 self.handle_error(f"Error closing current log stream {self.filename} before rollover: {e}")
-                # Attempt to continue rotation even if close failed, but log the error.
-        self._stream = None # Ensure stream reference is cleared regardless
+        self._stream = None # Ensure stream reference is cleared
 
         # 2. Perform Backup Renames
         try:
-            # Check rotation condition *again* after closing stream, just to be absolutely sure
-            # This check uses the file system size.
-            if self.maxBytes > 0 and self.filename.exists() and self.filename.stat().st_size >= self.maxBytes:
-                 # Condition still met, proceed with renaming/deletion.
+             if self.backupCount > 0:
+                 # Rename existing backups: file.N-1 -> file.N, file.N-2 -> file.N-1, ..., file -> file.1
+                 for i in range(self.backupCount - 1, -1, -1): # Iterate down from N-1 to 0
+                     source_fn_base = self.filename.name
+                     source_fn = self.filename if i == 0 else self.filename.with_name(f"{source_fn_base}.{i}")
+                     dest_fn = self.filename.with_name(f"{source_fn_base}.{i + 1}")
 
-                 if self.backupCount > 0:
-                     # Rename existing backups: file.N-1 -> file.N, file.N-2 -> file.N-1, ..., file -> file.1
-                     for i in range(self.backupCount - 1, -1, -1): # Iterate down from N-1 to 0
-                         source_fn_base = self.filename.name
-                         source_fn = self.filename if i == 0 else self.filename.with_name(f"{source_fn_base}.{i}")
-                         dest_fn = self.filename.with_name(f"{source_fn_base}.{i + 1}")
-
-                         if source_fn.exists():
-                             # If the destination (e.g., file.N) exists, remove it first
-                             if dest_fn.exists():
-                                 try:
-                                     dest_fn.unlink()
-                                 except OSError as e_unlink:
-                                      self.handle_error(f"Error removing existing backup {dest_fn} during rollover: {e_unlink}")
-                                      # Decide whether to proceed or abort rotation here? For now, continue.
+                     if source_fn.exists():
+                         # If the destination (e.g., file.N) exists, remove it first
+                         if dest_fn.exists():
                              try:
-                                 # Rename source to destination
-                                 source_fn.rename(dest_fn)
-                             except OSError as e_rename:
-                                  self.handle_error(f"Error renaming {source_fn} to {dest_fn} during rollover: {e_rename}")
-                                  # If renaming fails, subsequent steps might be inconsistent.
-
-                 else: # backupCount is 0: Just remove the current log file
-                     if self.filename.exists():
+                                 dest_fn.unlink()
+                             except OSError as e_unlink:
+                                  self.handle_error(f"Error removing existing backup {dest_fn} during rollover: {e_unlink}")
                          try:
-                             self.filename.unlink()
-                         except OSError as e_unlink_base:
-                             self.handle_error(f"Error removing primary log file {self.filename} (backupCount=0) during rollover: {e_unlink_base}")
+                             # Rename source to destination
+                             source_fn.rename(dest_fn)
+                         except OSError as e_rename:
+                              self.handle_error(f"Error renaming {source_fn} to {dest_fn} during rollover: {e_rename}")
 
-            # else: # Rotation condition no longer met after closing stream.
-            #     # If we closed the stream unnecessarily, reopen it.
-            #     if stream_closed_by_us:
-            #         try:
-            #             self._open_file()
-            #         except Exception as e_reopen:
-            #             self.handle_error(f"Error reopening stream {self.filename} after unnecessary close in rollover: {e_reopen}")
-            #     return # Exit rollover process
+             else: # backupCount is 0: Just remove the current log file
+                 if self.filename.exists():
+                     try:
+                         self.filename.unlink()
+                     except OSError as e_unlink_base:
+                         self.handle_error(f"Error removing primary log file {self.filename} (backupCount=0) during rollover: {e_unlink_base}")
 
         except Exception as e_fs:
              # Catch broad errors during filesystem operations
@@ -1734,8 +1727,7 @@ class ASCIIColors:
         with cls._handler_lock: # Check handler list safely
             if not cls._handlers and not cls._basicConfig_called:
                  default_handler = ConsoleHandler(level=cls._global_level) # Respect global level
-                 # Assign a default formatter if none exists? No, let handle() do it.
-                 # default_handler.setFormatter(Formatter()) # Default % style
+                 default_handler.setFormatter(Formatter()) # Assign default formatter explicitly
                  cls._handlers.append(default_handler)
                  # Avoid setting _basicConfig_called = True here, only basicConfig sets it.
 
@@ -1850,234 +1842,275 @@ class ASCIIColors:
         text: str,
         color: str = color_white,
         style: str = "",
-        background: str = "", # Added background parameter
+        background: str = "",
         end: str = "\n",
         flush: bool = False,
-        file: StreamType = sys.stdout
-    ) -> None:
+        file: StreamType = sys.stdout,
+        emit: bool = True,
+    ) -> str:
         """
-        Prints text directly to a stream with specified color, style, and background.
+        Formats and optionally prints text with ANSI color, style, and background.
 
-        This method bypasses the entire logging system (`handlers`, `formatters`,
-        `levels`, `context`). It's a direct wrapper around the built-in `print`.
+        This method is the low-level primitive used by all direct-print helpers
+        (colors, styles, backgrounds). It can either emit the formatted text to
+        a stream or return it for later use, enabling composition, testing,
+        logging, or deferred output.
+
+        When `emit` is True (default), the formatted text is written directly
+        to the target stream, bypassing the logging system entirely.
 
         Args:
-            text: The string to print.
-            color: ANSI foreground color code (e.g., `ASCIIColors.color_red`).
-                   Defaults to `color_white`.
-            style: ANSI style code(s) (e.g., `ASCIIColors.style_bold`). Multiple
-                   styles can be concatenated (e.g., `style_bold + style_underline`).
-                   Defaults to "".
-            background: ANSI background color code (e.g., `ASCIIColors.color_bg_blue`).
-                        Defaults to "".
-            end: String appended after the text. Defaults to newline (`\\n`).
-            flush: Whether to forcibly flush the stream. Defaults to False.
-            file: The stream to write to. Defaults to `sys.stdout`.
+            text: The text content to format.
+            color: ANSI foreground color code (e.g. `ASCIIColors.color_red`).
+                Defaults to `color_white`.
+            style: ANSI style code(s) (e.g. `ASCIIColors.style_bold`). Multiple
+                styles may be concatenated.
+            background: ANSI background color code (e.g. `ASCIIColors.color_bg_blue`).
+                        Defaults to no background.
+            end: String appended after the text. Defaults to a newline.
+            flush: Whether to flush the output stream immediately.
+            file: Output stream to write to. Defaults to `sys.stdout`.
+            emit: If True, prints the formatted text immediately. If False,
+                no output is written to the stream.
+
+        Returns:
+            The fully formatted ANSI string, including reset code and line ending.
         """
-        # Construct the ANSI sequence prefix
         prefix = f"{style}{background}{color}"
-        # Print the styled text followed by a reset code
-        print(f"{prefix}{text}{ASCIIColors.color_reset}", end=end, flush=flush, file=file)
+        output = f"{prefix}{text}{ASCIIColors.color_reset}"
+
+        if emit:
+            print(output, end=end, flush=flush, file=file)
+
+        return output
+
 
     # --- Direct Print - Status ---
     @staticmethod
-    def success(text: str, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
-        """Directly prints text in green color."""
-        ASCIIColors.print(text, ASCIIColors.color_green, "", "", end, flush, file)
+    def success(text: str, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
+        """Formats and optionally prints text in green color."""
+        return ASCIIColors.print(text, ASCIIColors.color_green, "", "", end, flush, file, emit)
+
 
     @staticmethod
-    def fail(text: str, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
-        """Directly prints text in red color."""
-        ASCIIColors.print(text, ASCIIColors.color_red, "", "", end, flush, file)
+    def fail(text: str, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
+        """Formats and optionally prints text in red color."""
+        return ASCIIColors.print(text, ASCIIColors.color_red, "", "", end, flush, file, emit)
+
 
     # --- Direct Print - Foreground Colors ---
     @staticmethod
-    def black(text: str, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
-        """Directly prints text in black color."""
-        ASCIIColors.print(text, ASCIIColors.color_black, "", "", end, flush, file)
+    def black(text: str, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
+        """Formats and optionally prints text in black color."""
+        return ASCIIColors.print(text, ASCIIColors.color_black, "", "", end, flush, file, emit)
+
+
     @staticmethod
-    def red(text: str, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
-        """Directly prints text in red color."""
-        ASCIIColors.print(text, ASCIIColors.color_red, "", "", end, flush, file)
+    def red(text: str, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
+        """Formats and optionally prints text in red color."""
+        return ASCIIColors.print(text, ASCIIColors.color_red, "", "", end, flush, file, emit)
+
+
     @staticmethod
-    def green(text: str, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
-        """Directly prints text in green color."""
-        ASCIIColors.print(text, ASCIIColors.color_green, "", "", end, flush, file)
+    def green(text: str, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
+        """Formats and optionally prints text in green color."""
+        return ASCIIColors.print(text, ASCIIColors.color_green, "", "", end, flush, file, emit)
+
+
     @staticmethod
-    def yellow(text: str, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
-        """Directly prints text in yellow color."""
-        ASCIIColors.print(text, ASCIIColors.color_yellow, "", "", end, flush, file)
+    def yellow(text: str, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
+        """Formats and optionally prints text in yellow color."""
+        return ASCIIColors.print(text, ASCIIColors.color_yellow, "", "", end, flush, file, emit)
+
+
     @staticmethod
-    def blue(text: str, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
-        """Directly prints text in blue color."""
-        ASCIIColors.print(text, ASCIIColors.color_blue, "", "", end, flush, file)
+    def blue(text: str, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
+        """Formats and optionally prints text in blue color."""
+        return ASCIIColors.print(text, ASCIIColors.color_blue, "", "", end, flush, file, emit)
+
+
     @staticmethod
-    def magenta(text: str, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
-        """Directly prints text in magenta color."""
-        ASCIIColors.print(text, ASCIIColors.color_magenta, "", "", end, flush, file)
+    def magenta(text: str, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
+        """Formats and optionally prints text in magenta color."""
+        return ASCIIColors.print(text, ASCIIColors.color_magenta, "", "", end, flush, file, emit)
+
+
     @staticmethod
-    def cyan(text: str, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
-        """Directly prints text in cyan color."""
-        ASCIIColors.print(text, ASCIIColors.color_cyan, "", "", end, flush, file)
+    def cyan(text: str, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
+        """Formats and optionally prints text in cyan color."""
+        return ASCIIColors.print(text, ASCIIColors.color_cyan, "", "", end, flush, file, emit)
+
+
     @staticmethod
-    def white(text: str, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
-        """Directly prints text in white color."""
-        ASCIIColors.print(text, ASCIIColors.color_white, "", "", end, flush, file)
+    def white(text: str, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
+        """Formats and optionally prints text in white color."""
+        return ASCIIColors.print(text, ASCIIColors.color_white, "", "", end, flush, file, emit)
+
+
     @staticmethod
-    def orange(text: str, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
-        """Directly prints text in orange color (256-color approx)."""
-        ASCIIColors.print(text, ASCIIColors.color_orange, "", "", end, flush, file)
+    def orange(text: str, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
+        """Formats and optionally prints text in orange color (256-color approx)."""
+        return ASCIIColors.print(text, ASCIIColors.color_orange, "", "", end, flush, file, emit)
+
+    # Bright Foreground Colors
     @staticmethod
-    def bright_black(text: str, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
-        """Directly prints text in bright black (gray) color."""
-        ASCIIColors.print(text, ASCIIColors.color_bright_black, "", "", end, flush, file)
+    def bright_black(text: str, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
+        return ASCIIColors.print(text, ASCIIColors.color_bright_black, "", "", end, flush, file, emit)
+
+
     @staticmethod
-    def bright_red(text: str, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
-        """Directly prints text in bright red color."""
-        ASCIIColors.print(text, ASCIIColors.color_bright_red, "", "", end, flush, file)
+    def bright_red(text: str, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
+        return ASCIIColors.print(text, ASCIIColors.color_bright_red, "", "", end, flush, file, emit)
+
+
     @staticmethod
-    def bright_green(text: str, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
-        """Directly prints text in bright green color."""
-        ASCIIColors.print(text, ASCIIColors.color_bright_green, "", "", end, flush, file)
+    def bright_green(text: str, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
+        return ASCIIColors.print(text, ASCIIColors.color_bright_green, "", "", end, flush, file, emit)
+
+
     @staticmethod
-    def bright_yellow(text: str, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
-        """Directly prints text in bright yellow color."""
-        ASCIIColors.print(text, ASCIIColors.color_bright_yellow, "", "", end, flush, file)
+    def bright_yellow(text: str, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
+        return ASCIIColors.print(text, ASCIIColors.color_bright_yellow, "", "", end, flush, file, emit)
+
+
     @staticmethod
-    def bright_blue(text: str, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
-        """Directly prints text in bright blue color."""
-        ASCIIColors.print(text, ASCIIColors.color_bright_blue, "", "", end, flush, file)
+    def bright_blue(text: str, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
+        return ASCIIColors.print(text, ASCIIColors.color_bright_blue, "", "", end, flush, file, emit)
+
+
     @staticmethod
-    def bright_magenta(text: str, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
-        """Directly prints text in bright magenta color."""
-        ASCIIColors.print(text, ASCIIColors.color_bright_magenta, "", "", end, flush, file)
+    def bright_magenta(text: str, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
+        return ASCIIColors.print(text, ASCIIColors.color_bright_magenta, "", "", end, flush, file, emit)
+
+
     @staticmethod
-    def bright_cyan(text: str, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
-        """Directly prints text in bright cyan color."""
-        ASCIIColors.print(text, ASCIIColors.color_bright_cyan, "", "", end, flush, file)
+    def bright_cyan(text: str, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
+        return ASCIIColors.print(text, ASCIIColors.color_bright_cyan, "", "", end, flush, file, emit)
+
+
     @staticmethod
-    def bright_white(text: str, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
-        """Directly prints text in bright white color."""
-        ASCIIColors.print(text, ASCIIColors.color_bright_white, "", "", end, flush, file)
+    def bright_white(text: str, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
+        return ASCIIColors.print(text, ASCIIColors.color_bright_white, "", "", end, flush, file, emit)
+
 
     # --- Direct Print - Background Colors ---
     @staticmethod
-    def print_with_bg(text: str, color: str = color_white, background: str = "", style: str = "", end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
+    def print_with_bg(text: str, color: str = color_white, background: str = "", style: str = "", end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
         """
         [DEPRECATED] Helper to print with background; use `ASCIIColors.print()` with `background` parameter instead.
         Directly prints text with specified foreground color, background color, and style.
         """
         # This method is now redundant with the `background` parameter in `print`.
         # Kept for backward compatibility, simply delegates to `print`.
-        ASCIIColors.print(text, color, style, background, end, flush, file)
+        return ASCIIColors.print(text, color, style, background, end, flush, file, emit)
 
     @staticmethod
-    def bg_black(text: str, color: str = color_white, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
+    def bg_black(text: str, color: str = color_white, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
         """Directly prints text with a black background."""
-        ASCIIColors.print(text, color, "", ASCIIColors.color_bg_black, end, flush, file)
+        return ASCIIColors.print(text, color, "", ASCIIColors.color_bg_black, end, flush, file, emit)
     @staticmethod
-    def bg_red(text: str, color: str = color_white, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
+    def bg_red(text: str, color: str = color_white, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
         """Directly prints text with a red background."""
-        ASCIIColors.print(text, color, "", ASCIIColors.color_bg_red, end, flush, file)
+        return ASCIIColors.print(text, color, "", ASCIIColors.color_bg_red, end, flush, file, emit)
     @staticmethod
-    def bg_green(text: str, color: str = color_white, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
+    def bg_green(text: str, color: str = color_white, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
         """Directly prints text with a green background."""
-        ASCIIColors.print(text, color, "", ASCIIColors.color_bg_green, end, flush, file)
+        return ASCIIColors.print(text, color, "", ASCIIColors.color_bg_green, end, flush, file, emit)
     @staticmethod
-    def bg_yellow(text: str, color: str = color_black, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
+    def bg_yellow(text: str, color: str = color_black, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
         """Directly prints text with a yellow background (default text: black)."""
-        ASCIIColors.print(text, color, "", ASCIIColors.color_bg_yellow, end, flush, file)
+        return ASCIIColors.print(text, color, "", ASCIIColors.color_bg_yellow, end, flush, file, emit)
     @staticmethod
-    def bg_blue(text: str, color: str = color_white, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
+    def bg_blue(text: str, color: str = color_white, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
         """Directly prints text with a blue background."""
-        ASCIIColors.print(text, color, "", ASCIIColors.color_bg_blue, end, flush, file)
+        return ASCIIColors.print(text, color, "", ASCIIColors.color_bg_blue, end, flush, file, emit)
     @staticmethod
-    def bg_magenta(text: str, color: str = color_white, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
+    def bg_magenta(text: str, color: str = color_white, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
         """Directly prints text with a magenta background."""
-        ASCIIColors.print(text, color, "", ASCIIColors.color_bg_magenta, end, flush, file)
+        return ASCIIColors.print(text, color, "", ASCIIColors.color_bg_magenta, end, flush, file, emit)
     @staticmethod
-    def bg_cyan(text: str, color: str = color_white, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
+    def bg_cyan(text: str, color: str = color_white, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
         """Directly prints text with a cyan background."""
-        ASCIIColors.print(text, color, "", ASCIIColors.color_bg_cyan, end, flush, file)
+        return ASCIIColors.print(text, color, "", ASCIIColors.color_bg_cyan, end, flush, file, emit)
     @staticmethod
-    def bg_white(text: str, color: str = color_black, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
+    def bg_white(text: str, color: str = color_black, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
         """Directly prints text with a white background (default text: black)."""
-        ASCIIColors.print(text, color, "", ASCIIColors.color_bg_white, end, flush, file)
+        return ASCIIColors.print(text, color, "", ASCIIColors.color_bg_white, end, flush, file, emit)
     @staticmethod
-    def bg_orange(text: str, color: str = color_black, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
+    def bg_orange(text: str, color: str = color_black, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
         """Directly prints text with an orange background (256-color approx, default text: black)."""
-        ASCIIColors.print(text, color, "", ASCIIColors.color_bg_orange, end, flush, file)
+        return ASCIIColors.print(text, color, "", ASCIIColors.color_bg_orange, end, flush, file, emit)
     @staticmethod
-    def bg_bright_black(text: str, color: str = color_white, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
+    def bg_bright_black(text: str, color: str = color_white, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
         """Directly prints text with a bright black (gray) background."""
-        ASCIIColors.print(text, color, "", ASCIIColors.color_bg_bright_black, end, flush, file)
+        return ASCIIColors.print(text, color, "", ASCIIColors.color_bg_bright_black, end, flush, file, emit)
     @staticmethod
-    def bg_bright_red(text: str, color: str = color_white, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
+    def bg_bright_red(text: str, color: str = color_white, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
         """Directly prints text with a bright red background."""
-        ASCIIColors.print(text, color, "", ASCIIColors.color_bg_bright_red, end, flush, file)
+        return ASCIIColors.print(text, color, "", ASCIIColors.color_bg_bright_red, end, flush, file, emit)
     @staticmethod
-    def bg_bright_green(text: str, color: str = color_black, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
+    def bg_bright_green(text: str, color: str = color_black, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
         """Directly prints text with a bright green background (default text: black)."""
-        ASCIIColors.print(text, color, "", ASCIIColors.color_bg_bright_green, end, flush, file)
+        return ASCIIColors.print(text, color, "", ASCIIColors.color_bg_bright_green, end, flush, file, emit)
     @staticmethod
-    def bg_bright_yellow(text: str, color: str = color_black, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
+    def bg_bright_yellow(text: str, color: str = color_black, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
         """Directly prints text with a bright yellow background (default text: black)."""
-        ASCIIColors.print(text, color, "", ASCIIColors.color_bg_bright_yellow, end, flush, file)
+        return ASCIIColors.print(text, color, "", ASCIIColors.color_bg_bright_yellow, end, flush, file, emit)
     @staticmethod
-    def bg_bright_blue(text: str, color: str = color_white, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
+    def bg_bright_blue(text: str, color: str = color_white, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
         """Directly prints text with a bright blue background."""
-        ASCIIColors.print(text, color, "", ASCIIColors.color_bg_bright_blue, end, flush, file)
+        return ASCIIColors.print(text, color, "", ASCIIColors.color_bg_bright_blue, end, flush, file, emit)
     @staticmethod
-    def bg_bright_magenta(text: str, color: str = color_white, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
+    def bg_bright_magenta(text: str, color: str = color_white, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
         """Directly prints text with a bright magenta background."""
-        ASCIIColors.print(text, color, "", ASCIIColors.color_bg_bright_magenta, end, flush, file)
+        return ASCIIColors.print(text, color, "", ASCIIColors.color_bg_bright_magenta, end, flush, file, emit)
     @staticmethod
-    def bg_bright_cyan(text: str, color: str = color_black, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
+    def bg_bright_cyan(text: str, color: str = color_black, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
         """Directly prints text with a bright cyan background (default text: black)."""
-        ASCIIColors.print(text, color, "", ASCIIColors.color_bg_bright_cyan, end, flush, file)
+        return ASCIIColors.print(text, color, "", ASCIIColors.color_bg_bright_cyan, end, flush, file, emit)
     @staticmethod
-    def bg_bright_white(text: str, color: str = color_black, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
+    def bg_bright_white(text: str, color: str = color_black, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
         """Directly prints text with a bright white background (default text: black)."""
-        ASCIIColors.print(text, color, "", ASCIIColors.color_bg_bright_white, end, flush, file)
+        return ASCIIColors.print(text, color, "", ASCIIColors.color_bg_bright_white, end, flush, file, emit)
 
     # --- Direct Print - Styles ---
     @staticmethod
-    def bold(text: str, color: str = color_white, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
+    def bold(text: str, color: str = color_white, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
         """Directly prints text in bold style."""
-        ASCIIColors.print(text, color, ASCIIColors.style_bold, "", end, flush, file)
+        return ASCIIColors.print(text, color, ASCIIColors.style_bold, "", end, flush, file, emit)
     @staticmethod
-    def dim(text: str, color: str = color_white, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
+    def dim(text: str, color: str = color_white, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
         """Directly prints text in dim style."""
-        ASCIIColors.print(text, color, ASCIIColors.style_dim, "", end, flush, file)
+        return ASCIIColors.print(text, color, ASCIIColors.style_dim, "", end, flush, file, emit)
     @staticmethod
-    def italic(text: str, color: str = color_white, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
+    def italic(text: str, color: str = color_white, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
         """Directly prints text in italic style."""
-        ASCIIColors.print(text, color, ASCIIColors.style_italic, "", end, flush, file)
+        return ASCIIColors.print(text, color, ASCIIColors.style_italic, "", end, flush, file, emit)
     @staticmethod
-    def underline(text: str, color: str = color_white, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
+    def underline(text: str, color: str = color_white, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
         """Directly prints text in underline style."""
-        ASCIIColors.print(text, color, ASCIIColors.style_underline, "", end, flush, file)
+        return ASCIIColors.print(text, color, ASCIIColors.style_underline, "", end, flush, file, emit)
     @staticmethod
-    def blink(text: str, color: str = color_white, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
+    def blink(text: str, color: str = color_white, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
         """Directly prints text in blinking style."""
-        ASCIIColors.print(text, color, ASCIIColors.style_blink, "", end, flush, file)
+        return ASCIIColors.print(text, color, ASCIIColors.style_blink, "", end, flush, file, emit)
     @staticmethod
-    def reverse(text: str, color: str = color_white, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
+    def reverse(text: str, color: str = color_white, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
         """Directly prints text in reverse video style."""
-        ASCIIColors.print(text, color, ASCIIColors.style_reverse, "", end, flush, file)
+        return ASCIIColors.print(text, color, ASCIIColors.style_reverse, "", end, flush, file, emit)
     @staticmethod
-    def hidden(text: str, color: str = color_white, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
+    def hidden(text: str, color: str = color_white, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
         """Directly prints text in hidden style."""
-        ASCIIColors.print(text, color, ASCIIColors.style_hidden, "", end, flush, file)
+        return ASCIIColors.print(text, color, ASCIIColors.style_hidden, "", end, flush, file, emit)
     @staticmethod
-    def strikethrough(text: str, color: str = color_white, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
+    def strikethrough(text: str, color: str = color_white, end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> str:
         """Directly prints text in strikethrough style."""
-        ASCIIColors.print(text, color, ASCIIColors.style_strikethrough, "", end, flush, file)
+        return ASCIIColors.print(text, color, ASCIIColors.style_strikethrough, "", end, flush, file, emit)
 
 
     # --- Utility & Direct Console Manipulation Methods ---
     @staticmethod
-    def multicolor(texts: List[str], colors: List[str], end: str = "\n", flush: bool = False, file: StreamType = sys.stdout) -> None:
+    def multicolor(texts: List[str], colors: List[str], end: str = "\n", flush: bool = False, file: StreamType = sys.stdout, emit: bool = True) -> None:
         """
         Directly prints multiple text segments with corresponding colors on one line.
 
@@ -2988,7 +3021,9 @@ class Menu:
                             exit_menu_after = True; self._quit_menu = True; self._run_result = current_display_item.value
                     except Exception as e:
                         if self.hide_cursor: self._set_cursor_visibility(True)
-                        ASCIIColors.error(self.prompts['error'], file=self.file); trace_exception(e)
+                        # Use direct print for error prompt to ensure it goes to the menu's file
+                        ASCIIColors.print(self.prompts['error'], color=self.styles['error'], file=self.file)
+                        trace_exception(e) # This still logs the traceback
                     finally:
                         if not exit_menu_after and self.mode == 'execute':
                              if self.hide_cursor: self._set_cursor_visibility(False)
