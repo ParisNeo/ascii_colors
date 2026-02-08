@@ -218,22 +218,240 @@ or an open file handle in text mode."""
 
 # --- Utility Functions ---
 
-def get_trace_exception(ex: BaseException) -> str:
+
+def get_trace_exception(ex: BaseException, enhanced: bool = True, max_width: Optional[int] = None) -> str:
     """
-    Formats a given exception object and its traceback into a single string.
+    Formats a given exception object and its traceback into a string.
 
     This utility is useful for consistently formatting exception details,
     often used within formatters or when manually logging exception information.
 
+    When `enhanced=True`, produces a Rich-style formatted traceback with:
+    - Box-drawing borders and visual hierarchy
+    - Syntax-highlighted source code context
+    - Local variables at each frame (with smart truncation)
+    - Color-coded elements (paths, line numbers, error type)
+    - Better readability for complex nested tracebacks
+
     Args:
         ex: The exception instance to format.
+        enhanced: If True, produce Rich-style formatted output with locals and
+                  enhanced visual presentation. If False (default), produce
+                  standard Python traceback format.
+        max_width: Maximum width for output formatting. Defaults to terminal
+                   width or 100 characters. Only used when enhanced=True.
 
     Returns:
         A string containing the formatted exception type, message, and traceback.
     """
-    traceback_lines: List[str] = traceback.format_exception(type(ex), ex, ex.__traceback__)
-    return "".join(traceback_lines)
-
+    if not enhanced:
+        # Standard formatting - original behavior
+        traceback_lines: List[str] = traceback.format_exception(type(ex), ex, ex.__traceback__)
+        return "".join(traceback_lines)
+    
+    # === ENHANCED RICH-STYLE FORMATTING ===
+    
+    # Determine width
+    if max_width is None:
+        try:
+            max_width = shutil.get_terminal_size((100, 30)).columns
+        except Exception:
+            max_width = 100
+    max_width = max(80, min(max_width, 200))  # Clamp between 80 and 200
+    
+    # Color palette for Rich-style output
+    C_ERROR = ASCIIColors.color_bright_red
+    C_ERROR_BG = ASCIIColors.color_bg_red
+    C_PATH = ASCIIColors.color_cyan
+    C_LINE = ASCIIColors.color_bright_green
+    C_CODE = ASCIIColors.color_white
+    C_DIM = ASCIIColors.style_dim + ASCIIColors.color_bright_black
+    C_RESET = ASCIIColors.color_reset
+    C_BOLD = ASCIIColors.style_bold
+    C_YELLOW = ASCIIColors.color_yellow
+    C_MAGENTA = ASCIIColors.color_magenta
+    
+    # Box drawing characters
+    BOX_TOP = "╭"
+    BOX_HORZ = "─"
+    BOX_VERT = "│"
+    BOX_BOTTOM = "╰"
+    BOX_RIGHT = "╮"
+    BOX_LEFT = "╯"
+    BOX_T_LEFT = "├"
+    BOX_T_RIGHT = "┤"
+    
+    lines: List[str] = []
+    
+    # Header with error type
+    error_name = type(ex).__name__
+    error_msg = str(ex)
+    header = f"{C_ERROR}{C_BOLD}💥 {error_name}{C_RESET}"
+    if error_msg:
+        header += f"{C_ERROR}: {error_msg}{C_RESET}"
+    lines.append(header)
+    lines.append("")
+    
+    # Walk the traceback
+    tb = ex.__traceback__
+    frame_count = 0
+    frames: List[traceback.FrameSummary] = []
+    
+    # Collect all frames
+    while tb is not None:
+        frame = tb.tb_frame
+        filename = frame.f_code.co_filename
+        lineno = tb.tb_lineno
+        name = frame.f_code.co_name
+        
+        # Try to get source lines
+        try:
+            source_lines, start_line = inspect.getsourcelines(frame)
+            line_index = lineno - start_line
+            source_line = source_lines[line_index].strip() if 0 <= line_index < len(source_lines) else ""
+        except (OSError, IOError, TypeError):
+            source_lines = []
+            start_line = lineno
+            source_line = ""
+        
+        # Get locals (filtering out modules and large objects)
+        locals_dict: Dict[str, Any] = {}
+        for key, value in frame.f_locals.items():
+            if key.startswith('__') and key.endswith('__'):
+                continue  # Skip dunder variables
+            try:
+                repr_val = repr(value)
+                # Truncate long representations
+                if len(repr_val) > 120:
+                    repr_val = repr_val[:117] + "..."
+                locals_dict[key] = repr_val
+            except Exception:
+                locals_dict[key] = "<unrepresentable>"
+        
+        frames.append({
+            'filename': filename,
+            'lineno': lineno,
+            'name': name,
+            'source_line': source_line,
+            'source_lines': source_lines,
+            'start_line': start_line,
+            'line_index': line_index,
+            'locals': locals_dict,
+            'is_last': tb.tb_next is None
+        })
+        
+        tb = tb.tb_next
+        frame_count += 1
+    
+    # Build traceback section
+    trace_title = "Traceback (most recent call last)"
+    title_width = len(trace_title) + 4
+    padding = max_width - title_width - 2
+    
+    # Top border with title
+    top_border = f"{C_DIM}{BOX_TOP}{BOX_HORZ * 2} {trace_title} {BOX_HORZ * padding}{BOX_RIGHT}{C_RESET}"
+    lines.append(top_border)
+    
+    for i, frame in enumerate(frames):
+        is_last = frame['is_last']
+        
+        # File path line
+        filename = frame['filename']
+        lineno = frame['lineno']
+        name = frame['name']
+        
+        # Shorten filename if possible (show relative or just basename for site-packages)
+        try:
+            # Try to make it relative to current directory
+            rel_path = Path(filename).relative_to(Path.cwd())
+            display_path = str(rel_path)
+        except ValueError:
+            display_path = filename
+        
+        # File info line
+        file_line = f"{C_DIM}{BOX_VERT}  {C_RESET}{C_PATH}{display_path}{C_RESET}{C_DIM}:{C_LINE}{lineno}{C_DIM} in {C_YELLOW}{name}{C_RESET}"
+        lines.append(file_line)
+        
+        # Source code section
+        source = frame['source_line']
+        if source:
+            # Calculate padding for code alignment
+            prefix_len = len("│    ")
+            code_prefix = f"{C_DIM}{BOX_VERT}    {C_RESET}"
+            
+            # Show context: previous line, current line (highlighted), next line
+            source_lines = frame['source_lines']
+            line_idx = frame['line_index']
+            start = frame['start_line']
+            
+            # Previous line (dim)
+            if line_idx > 0:
+                prev_line = source_lines[line_idx - 1].rstrip()
+                prev_num = start + line_idx - 1
+                prev_str = f"{C_DIM}{BOX_VERT}    {prev_num:4d} {C_RESET}{C_DIM}{prev_line[:max_width-prefix_len-6]}{C_RESET}"
+                lines.append(prev_str)
+            
+            # Current line (highlighted with ❱ marker)
+            curr_num = lineno
+            curr_marker = f"{C_ERROR}❱{C_RESET} "
+            curr_str = f"{C_DIM}{BOX_VERT}    {curr_num:4d} {curr_marker}{C_CODE}{source[:max_width-prefix_len-8]}{C_RESET}"
+            lines.append(curr_str)
+            
+            # Next line (dim)
+            if line_idx < len(source_lines) - 1:
+                next_line = source_lines[line_idx + 1].rstrip()
+                next_num = start + line_idx + 1
+                next_str = f"{C_DIM}{BOX_VERT}    {next_num:4d} {C_RESET}{C_DIM}{next_line[:max_width-prefix_len-6]}{C_RESET}"
+                lines.append(next_str)
+        
+        # Locals section (collapsible-style, always shown in enhanced mode)
+        locals_dict = frame['locals']
+        if locals_dict:
+            # Locals header
+            locals_header = f"{C_DIM}{BOX_T_LEFT}{BOX_HORZ} locals {BOX_HORZ * (max_width - 12)}{BOX_T_RIGHT}{C_RESET}"
+            lines.append(locals_header)
+            
+            # Format locals in columns or wrapped
+            local_items = list(locals_dict.items())
+            items_per_line = 2  # Simple approach: 2 items per line
+            
+            for j in range(0, len(local_items), items_per_line):
+                chunk = local_items[j:j+items_per_line]
+                local_strs = []
+                for key, val in chunk:
+                    # Color-code key vs value
+                    key_str = f"{C_MAGENTA}{key}{C_RESET}"
+                    val_str = f"{C_YELLOW}{val}{C_RESET}"
+                    local_strs.append(f"{key_str} = {val_str}")
+                
+                joined = " │ ".join(local_strs)
+                # Trim if too long
+                avail_width = max_width - 4  # margins
+                if len(strip_ansi(joined)) > avail_width:
+                    joined = joined[:avail_width-3] + "..."
+                
+                locals_line = f"{C_DIM}{BOX_VERT}  {C_RESET}{joined}"
+                lines.append(locals_line)
+            
+            # Locals footer (only if not last frame)
+            if not is_last:
+                locals_footer = f"{C_DIM}{BOX_VERT}{C_RESET}"
+                lines.append(locals_footer)
+        
+        # Separator between frames (except after last)
+        if not is_last:
+            sep = f"{C_DIM}{BOX_VERT}{C_RESET}"
+            lines.append(sep)
+    
+    # Bottom border
+    bottom_border = f"{C_DIM}{BOX_BOTTOM}{BOX_HORZ * (max_width - 2)}{BOX_LEFT}{C_RESET}"
+    lines.append(bottom_border)
+    
+    # Final error summary at bottom
+    lines.append("")
+    lines.append(f"{C_ERROR}{C_BOLD}{error_name}{C_RESET}{C_ERROR}: {error_msg}{C_RESET}")
+    
+    return "\n".join(lines)
 # --- Formatter Classes ---
 
 class Formatter:
@@ -1474,9 +1692,9 @@ class ASCIIColors:
     # --- Global Logging State (Class Attributes) ---
     _handlers: List[Handler] = []
     """Internal list holding all globally configured Handler instances."""
-    _global_level: LogLevel = LogLevel.WARNING
+    _global_level: LogLevel = LogLevel.INFO
     """Internal global minimum log level. Messages below this level are discarded
-    before being passed to handlers. Defaults to WARNING."""
+    before being passed to handlers. Defaults to INFO."""
     _handler_lock: Lock = Lock()
     """A lock to ensure thread-safe modification of the global _handlers list
     and access during logging dispatch."""
@@ -2458,7 +2676,7 @@ class ASCIIColors:
             return "" # Return empty string on EOF
 
 # --- Global convenience function ---
-def trace_exception(ex: BaseException) -> None:
+def trace_exception(ex: BaseException, enhanced: bool = False, max_width: Optional[int] = None) -> None:
     """
     Logs the traceback of a given exception using the configured logging system.
 
@@ -2466,11 +2684,26 @@ def trace_exception(ex: BaseException) -> None:
     exception type as part of the message and sets `exc_info` to the exception
     instance, ensuring the traceback is captured and formatted by handlers.
 
+    When `enhanced=True`, produces a Rich-style formatted traceback with locals
+    and visual enhancements, logged at ERROR level.
+
     Args:
         ex: The exception instance to log.
+        enhanced: If True, use Rich-style formatting with locals display.
+                  If False, use standard traceback formatting.
+        max_width: Maximum width for enhanced formatting. Auto-detected if None.
     """
     # Uses the logging system, not direct print
-    ASCIIColors.error(f"Exception Traceback ({type(ex).__name__})", exc_info=ex)
+    formatted = get_trace_exception(ex, enhanced=enhanced, max_width=max_width)
+    # Log as error with the formatted message
+    # For enhanced mode, we don't want double formatting by the formatter,
+    # so we pass the pre-formatted string and skip exc_info processing
+    if enhanced:
+        # Direct log the formatted string without additional traceback formatting
+        ASCIIColors._log(LogLevel.ERROR, formatted, (), exc_info=None, logger_name='trace_exception')
+    else:
+        # Standard mode: let the logging system format the traceback
+        ASCIIColors.error(f"Exception Traceback ({type(ex).__name__})", exc_info=ex)
 
 
 # ==============================
