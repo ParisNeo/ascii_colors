@@ -1,470 +1,454 @@
-==============
 Usage Guide
-==============
+===========
 
-This guide provides detailed examples and explains the core concepts of ``ascii_colors``.
+This guide covers the main features of ascii_colors, from basic colored output to advanced logging and interactive prompts.
 
-.. _direct-vs-logging:
+Basic Colored Output
+--------------------
 
-Core Concepts: Direct Print vs. Logging
----------------------------------------
-
-``ascii_colors`` offers two fundamentally different ways to generate styled terminal output:
-
-.. important:: Understanding this distinction is key to using the library effectively.
-
-   1.  **Direct Print Methods** (`ASCIIColors.red`, `print`, `bold`, `bg_red`, etc.)
-       *   **What they do:** Print strings **directly** to a stream (default: `sys.stdout`) using Python's built-in `print` function.
-       *   **How they work:** Apply ANSI escape codes for colors and styles *immediately* before printing.
-       *   **Logging System:** They **completely bypass** the logging system. Levels, Handlers, Formatters, and Context **are ignored**.
-       *   **Use Case:** Best for simple, immediate visual feedback, status messages, user prompts, banners, or decorative output where structured logging isn't needed.
-
-   2.  **Logging System** (`basicConfig`, `getLogger`, `logger.info`, Handlers, Formatters)
-       *   **What it does:** Provides a structured, leveled logging framework, similar to Python's standard `logging`.
-       *   **How it works:** Log messages are created as `LogRecord`-like objects. They are filtered by level, processed by `Formatter`\ s to create strings, and then sent by `Handler`\ s to destinations (console, files, etc.).
-       *   **Styling:** Console output (via `ConsoleHandler`/`StreamHandler`) is typically colored based on the **log level** (e.g., Warnings Yellow, Errors Red) by default. Formatting is highly customizable.
-       *   **Interaction:** Use the recommended `logging`-compatible API (`import ascii_colors as logging`) or the `ASCIIColors` class methods (`ASCIIColors.info`, `add_handler`). Both control the same underlying global logging state.
-       *   **Use Case:** Ideal for application logs, debugging information, tracing events, and any scenario requiring structured, filterable, and configurable output routing.
-
-.. _logging-compat-layer:
-
-Using the Logging Compatibility Layer (`import ascii_colors as logging`)
---------------------------------------------------------------------------
-
-The most convenient and recommended way to utilize the logging features is through the compatibility layer. It allows you to use familiar functions and patterns from Python's standard `logging` module.
+The simplest way to use ascii_colors is for direct colored printing:
 
 .. code-block:: python
-   :caption: using_compat_layer.py
-   :linenos:
 
-   import ascii_colors as logging # The crucial import alias
+    from ascii_colors import ASCIIColors
 
-   # Configure using basicConfig (similar to standard logging)
-   logging.basicConfig(
-       level=logging.INFO, # Set the minimum level to log
-       format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-       datefmt='%H:%M:%S'
-       # Default handler is StreamHandler to stderr with level-based coloring
-   )
+    # Simple colored output
+    ASCIIColors.red("This is red text")
+    ASCIIColors.green("This is green text")
+    ASCIIColors.yellow("This is yellow text")
 
-   # Get logger instances
-   logger = logging.getLogger('MyModule')
-   another_logger = logging.getLogger('Another.Component')
+    # Combining styles
+    ASCIIColors.print("Bold and blue", color=ASCIIColors.color_blue, style=ASCIIColors.style_bold)
 
-   # Log messages using standard methods
-   logger.debug("This won't be shown (global level is INFO)")
-   logger.info("Module started.")
-   another_logger.warning("Something looks suspicious.")
-   another_logger.error("Failed to process request.")
+    # Available colors and styles
+    ASCIIColors.cyan("Cyan text")
+    ASCIIColors.magenta("Magenta text")
+    ASCIIColors.orange("Orange text (256-color)")
+    ASCIIColors.bold("Bold text")
+    ASCIIColors.italic("Italic text")
 
-   # Benefit: Console output is automatically colored by level!
+Advanced Printing Features
+--------------------------
 
-This approach provides a smooth transition for projects already using standard `logging` or a familiar interface for new projects.
+Multicolor Text
+~~~~~~~~~~~~~~~
 
-.. _direct-print-colors-styles:
-
-Available Colors and Styles (for Direct Printing)
--------------------------------------------------
-
-These constants are attributes of the :class:`~ascii_colors.ASCIIColors` class. Use them with direct print methods like :meth:`~ascii_colors.ASCIIColors.print`, :meth:`~ascii_colors.ASCIIColors.bold`, :meth:`~ascii_colors.ASCIIColors.bg_red`, :meth:`~ascii_colors.ASCIIColors.multicolor`, etc.
-
-.. note::
-   Actual rendering depends on the capabilities of your terminal emulator. Most modern terminals support these styles and basic/bright colors. 256-color support (used for `orange`) is also common but not universal.
-
-**Reset Code**
-*************
-
-*   ``ASCIIColors.color_reset``: Resets all styles and colors to the terminal default. Automatically appended by most direct print methods.
-
-**Text Styles**
-**************
-
-*   ``ASCIIColors.style_bold``
-*   ``ASCIIColors.style_dim``
-*   ``ASCIIColors.style_italic``
-*   ``ASCIIColors.style_underline``
-*   ``ASCIIColors.style_blink`` *(support varies)*
-*   ``ASCIIColors.style_reverse`` *(swaps foreground/background)*
-*   ``ASCIIColors.style_hidden`` *(conceals text; support varies)*
-*   ``ASCIIColors.style_strikethrough``
-
-**Foreground Colors (Regular)**
-*******************************
-
-*   ``ASCIIColors.color_black``
-*   ``ASCIIColors.color_red``
-*   ``ASCIIColors.color_green``
-*   ``ASCIIColors.color_yellow``
-*   ``ASCIIColors.color_blue``
-*   ``ASCIIColors.color_magenta``
-*   ``ASCIIColors.color_cyan``
-*   ``ASCIIColors.color_white``
-*   ``ASCIIColors.color_orange`` *(256-color approximation)*
-
-**Foreground Colors (Bright)**
-******************************
-
-*   ``ASCIIColors.color_bright_black`` *(often gray)*
-*   ``ASCIIColors.color_bright_red``
-*   ``ASCIIColors.color_bright_green``
-*   ``ASCIIColors.color_bright_yellow``
-*   ``ASCIIColors.color_bright_blue``
-*   ``ASCIIColors.color_bright_magenta``
-*   ``ASCIIColors.color_bright_cyan``
-*   ``ASCIIColors.color_bright_white``
-
-**Background Colors (Regular)**
-*******************************
-
-*   ``ASCIIColors.bg_black``
-*   ``ASCIIColors.bg_red``
-*   ``ASCIIColors.bg_green``
-*   ``ASCIIColors.bg_yellow``
-*   ``ASCIIColors.bg_blue``
-*   ``ASCIIColors.bg_magenta``
-*   ``ASCIIColors.bg_cyan``
-*   ``ASCIIColors.bg_white``
-*   ``ASCIIColors.bg_orange`` *(256-color approximation)*
-
-**Background Colors (Bright)**
-******************************
-
-*   ``ASCIIColors.bg_bright_black``
-*   ``ASCIIColors.bg_bright_red``
-*   ``ASCIIColors.bg_bright_green``
-*   ``ASCIIColors.bg_bright_yellow``
-*   ``ASCIIColors.bg_bright_blue``
-*   ``ASCIIColors.bg_bright_magenta``
-*   ``ASCIIColors.bg_bright_cyan``
-*   ``ASCIIColors.bg_bright_white``
-
-Direct Printing Examples
-------------------------
+Print text with multiple colors in one call:
 
 .. code-block:: python
-   :caption: direct_print_examples.py
-   :linenos:
 
-   from ascii_colors import ASCIIColors
+    ASCIIColors.multicolor(
+        ["Hello ", "World", "!"],
+        [ASCIIColors.color_green, ASCIIColors.color_yellow, ASCIIColors.color_red]
+    )
 
-   # --- Simple Colors ---
-   ASCIIColors.red("Error: File not found.")
-   ASCIIColors.green("Success: Configuration saved.")
-   ASCIIColors.blue("Info: Processing request...")
+Text Highlighting
+~~~~~~~~~~~~~~~~~
 
-   # --- Styles ---
-   ASCIIColors.bold("Important Announcement")
-   ASCIIColors.underline("Section Header", color=ASCIIColors.color_yellow)
-   ASCIIColors.italic("Note: This feature is experimental.", color=ASCIIColors.color_magenta)
-   ASCIIColors.dim("Less important details.")
-   ASCIIColors.strikethrough("Deprecated option.")
-
-   # --- Backgrounds ---
-   ASCIIColors.bg_yellow("WARNING", color=ASCIIColors.color_black) # Black text on yellow BG
-   ASCIIColors.print_with_bg(
-       " Critical Failure! ",
-       color=ASCIIColors.color_bright_white,
-       background=ASCIIColors.bg_bright_red
-   )
-
-   # --- Combining ---
-   ASCIIColors.print(
-       " Status: OK ",
-       color=ASCIIColors.color_black, # Text color
-       style=ASCIIColors.style_bold + ASCIIColors.style_reverse, # Bold and Reverse video
-       background=ASCIIColors.bg_bright_green # Base background (reversed)
-   )
-
-   # --- Multicolor ---
-   ASCIIColors.multicolor(
-       ["Task: ", "Upload", " | Progress: ", "100%", " | Status: ", "DONE"],
-       [
-           ASCIIColors.color_white, ASCIIColors.color_cyan,           # Task
-           ASCIIColors.color_white, ASCIIColors.color_bright_yellow, # Progress
-           ASCIIColors.color_white, ASCIIColors.color_bright_green   # Status
-       ]
-   )
-
-   # --- Highlight ---
-   log_line = "INFO: User 'admin' logged in from 127.0.0.1"
-   ASCIIColors.highlight(
-       text=log_line,
-       subtext=["INFO", "admin", "127.0.0.1"], # Words/phrases to highlight
-       color=ASCIIColors.color_white,           # Default text color
-       highlight_color=ASCIIColors.bg_blue + ASCIIColors.color_bright_white # Style for highlights
-   )
-
-Logging System Examples
------------------------
-
-**Setup with `basicConfig`**
-****************************
-
-The simplest way to configure logging. Ideal for scripts or basic applications.
+Highlight specific words or patterns in text:
 
 .. code-block:: python
-   :caption: logging_setup_basic.py
-   :linenos:
 
-   import ascii_colors as logging
-   import sys
+    # Highlight specific words
+    ASCIIColors.highlight(
+        "Error: File not found in /path/to/file",
+        subtext=["Error", "not found"],
+        highlight_color=ASCIIColors.color_red
+    )
 
-   logging.basicConfig(
-       level=logging.DEBUG, # Log everything from DEBUG upwards
-       stream=sys.stdout,   # Send logs to standard output
-       format='%(levelname)s:%(name)s:%(message)s' # Simple format
-   )
+    # Highlight entire lines containing pattern
+    ASCIIColors.highlight(
+        "line1: normal\nline2: ERROR occurred\nline3: normal",
+        subtext="ERROR",
+        whole_line=True,
+        highlight_color=ASCIIColors.color_bright_red
+    )
 
-   logger = logging.getLogger("BasicApp")
-   logger.debug("Starting process...")
-   logger.info("User interaction needed.")
+Composed Effects
+~~~~~~~~~~~~~~~~
 
-**Manual Setup for Advanced Control**
-*************************************
-
-Provides full control over handlers, formatters, and levels.
-
-.. code-block:: python
-   :caption: logging_setup_manual.py
-   :linenos:
-
-   import ascii_colors as logging
-   from ascii_colors import handlers # Access RotatingFileHandler
-   import sys
-   from pathlib import Path
-
-   # --- Get the root logger to configure ---
-   root_logger = logging.getLogger()
-
-   # --- Clear existing handlers (important if re-configuring) ---
-   root_logger.handlers.clear()
-   # Alternatively, use: logging.basicConfig(force=True, ...) to reset
-
-   # --- Set overall level for the logger ---
-   root_logger.setLevel(logging.DEBUG) # Allow all messages to pass to handlers
-
-   # --- Configure Console Handler ---
-   console_formatter = logging.Formatter(
-       # Using {}-style formatting
-       fmt='[{asctime}] <{name}> {levelname:^8s}: {message}',
-       style='{',
-       datefmt='%H:%M:%S'
-   )
-   console_handler = logging.StreamHandler(stream=sys.stdout)
-   console_handler.setLevel(logging.INFO) # Console shows INFO and above
-   console_handler.setFormatter(console_formatter)
-   root_logger.addHandler(console_handler)
-
-   # --- Configure File Handler ---
-   log_file = Path("app_detailed.log")
-   file_formatter = logging.Formatter(
-       # Using %-style formatting with source info
-       fmt='%(asctime)s|%(levelname)-8s|%(name)s:%(lineno)d|%(message)s',
-       style='%',
-       datefmt='%Y-%m-%d %H:%M:%S',
-       include_source=True # Capture file/line number (adds overhead)
-   )
-   file_handler = logging.FileHandler(log_file, mode='w', encoding='utf-8')
-   file_handler.setLevel(logging.DEBUG) # File logs everything (DEBUG and above)
-   file_handler.setFormatter(file_formatter)
-   root_logger.addHandler(file_handler)
-
-   # --- Configure Rotating JSON File Handler ---
-   json_log_file = Path("audit.jsonl")
-   json_formatter = logging.JSONFormatter(
-       # Define the structure of the JSON output
-       fmt={
-           "ts": "asctime",
-           "level": "levelname",
-           "logger": "name",
-           "msg": "message",
-           "req_id": "request_id", # Include custom context
-           "user": "user_name",   # Include custom context
-           "file": "filename",
-           "line": "lineno",
-       },
-       datefmt="iso", # ISO8601 timestamp format
-       style='%', # Style applies to how fmt values are looked up
-       json_ensure_ascii=False
-   )
-   # Use the handlers namespace
-   rotating_json_handler = handlers.RotatingFileHandler(
-       json_log_file,
-       maxBytes=5 * 1024 * 1024, # 5 MB
-       backupCount=5,
-       encoding='utf-8'
-   )
-   rotating_json_handler.setLevel(logging.WARNING) # Log WARNING and above as JSON
-   rotating_json_handler.setFormatter(json_formatter)
-   root_logger.addHandler(rotating_json_handler)
-
-
-   # --- Now, log messages using any logger ---
-   main_logger = logging.getLogger("MainApp")
-   util_logger = logging.getLogger("MainApp.Utils")
-
-   main_logger.debug("Low-level detail.") # File only
-   util_logger.info("Utility function called.") # Console and File
-   main_logger.warning(
-       "Possible issue detected.",
-       extra={"request_id": "xyz789", "user_name": "guest"} # Add context
-   ) # Console, File, and JSON
-   main_logger.error(
-       "Operation failed!",
-       extra={"request_id": "xyz789", "user_name": "admin"}
-   ) # Console, File, and JSON
-
-**Logging Messages**
-********************
-
-Use standard logger methods.
+Combine multiple effects by nesting calls:
 
 .. code-block:: python
-   :caption: logging_messages.py
-   :linenos:
 
-   import ascii_colors as logging
+    # Bold green text
+    bold_green = ASCIIColors.green("Success!", emit=False, end="")
+    ASCIIColors.bold(bold_green)  # Or use print with both parameters
 
-   # Assume logging is configured (e.g., via basicConfig or manual setup)
-   logger = logging.getLogger("DataProcessor")
+Interactive Features
+--------------------
 
-   # Standard levels
-   logger.debug("Starting data validation for batch %d.", 101)
-   logger.info("Processing %d records.", 5000)
-   logger.warning("Record %d has missing field 'email'. Skipping.", 1234)
-   logger.error("Failed to connect to database '%s'.", "prod_db")
-   logger.critical("Data corruption detected! Halting process.")
+Progress Bars
+~~~~~~~~~~~~~
 
-   # Logging exceptions
-   try:
-       data = {}
-       value = data['required_key']
-   except KeyError as e:
-       # Option 1: Log error with traceback automatically
-       logger.exception("Missing required data key!")
-       # Option 2: Log error manually including traceback
-       # logger.error("Missing required data key!", exc_info=True)
-       # Option 3: Use the utility function (logs at ERROR level)
-       # from ascii_colors import trace_exception
-       # trace_exception(e)
-
-Context Management
-------------------
-
-Add thread-local context to enrich log records automatically. Formatters must be configured to include the context keys.
+Create beautiful progress bars similar to tqdm:
 
 .. code-block:: python
-   :caption: logging_context.py
-   :linenos:
 
-   import ascii_colors as logging
-   from ascii_colors import ASCIIColors # Needed for context manager
-   import threading
-   import time
-   import sys
-   import random
+    from ascii_colors import ProgressBar
+    import time
 
-   # Setup a formatter that includes 'request_id' and 'user'
-   log_format = "[{asctime}] Req:{request_id}|User:{user} ({name}) {levelname}: {message}"
-   formatter = logging.Formatter(log_format, style='{', datefmt='%H:%M:%S')
-   handler = logging.StreamHandler(stream=sys.stdout)
-   handler.setFormatter(formatter)
-   logging.basicConfig(level=logging.INFO, handlers=[handler], force=True) # Reset config
+    # Wrap an iterable
+    for i in ProgressBar(range(100), desc="Processing"):
+        time.sleep(0.01)
 
-   logger = logging.getLogger("WebServer")
+    # Manual control
+    with ProgressBar(total=100, desc="Uploading", color=ASCIIColors.color_cyan) as pbar:
+        for chunk in upload_chunks():
+            pbar.update(len(chunk))
 
-   def handle_web_request(req_id, user):
-       # Use the context manager: sets context vars for this thread's scope
-       with ASCIIColors.context(request_id=req_id, user=user):
-           logger.info("Request received.")
-           # Simulate work
-           time.sleep(random.uniform(0.1, 0.3))
-           if user == "guest":
-               logger.warning("Guest access has limited permissions.")
-           logger.info("Request processed successfully.")
-           # Context (request_id, user) is automatically cleared upon exiting 'with'
+    # Custom styling
+    pbar = ProgressBar(
+        range(50),
+        desc="Custom",
+        progress_char="█",
+        empty_char="░",
+        bar_style="fill"  # or "line"
+    )
 
-   # Simulate multiple concurrent requests
-   threads = []
-   for i in range(3):
-       user = random.choice(['alice', 'bob', 'guest'])
-       req_id = f"req-{i+1:03d}"
-       thread = threading.Thread(target=handle_web_request, args=(req_id, user))
-       threads.append(thread)
-       thread.start()
+Interactive Menus
+~~~~~~~~~~~~~~~~~
 
-   for t in threads:
-       t.join()
-
-   # Outside the threads/context, the keys are not set
-   # logger.info("Finished processing all requests.") # Would cause KeyError if context keys missing
-
-Utilities
----------
-
-**Animation Spinner (`execute_with_animation`)**
-*************************************************
-
-Displays a spinner while a function executes. Uses **direct printing** for the spinner itself.
+Create interactive terminal menus with keyboard navigation:
 
 .. code-block:: python
-   :caption: utility_animation.py
-   :linenos:
 
-   import time
-   from ascii_colors import ASCIIColors
-   import ascii_colors as logging # For logging within the task
+    from ascii_colors import Menu
 
-   # Configure logging if the task needs it
-   logging.basicConfig(level=logging.INFO, format='%(message)s')
+    # Simple action menu
+    def action_one():
+        print("Action one executed!")
 
-   def simulate_database_query(query_id):
-       logging.info(f"[Task {query_id}] Starting query...")
-       duration = random.uniform(1, 3)
-       time.sleep(duration)
-       if random.random() < 0.2: # Simulate occasional failures
-           raise ConnectionError(f"DB connection lost during query {query_id}")
-       logging.info(f"[Task {query_id}] Query finished.")
-       return f"Query {query_id} results (found {random.randint(10,100)} rows)"
+    def action_two():
+        print("Action two executed!")
 
-   # --- Execute with animation ---
-   query_to_run = "Q101"
-   try:
-       # result = ASCIIColors.execute_with_animation(
-       #     pending_text=f"Running database query {query_to_run}...",
-       #     func=simulate_database_query,
-       #     # *args for func:
-       #     query_id=query_to_run,
-       #     # Optional color for the pending text:
-       #     color=ASCIIColors.color_cyan
-       # )
-       # Use the direct print methods for the overall status of the animated task
-       # ASCIIColors.success(f"Animation completed: {result}")
-       # Dummy call for example build without randomness
-       ASCIIColors.success("Animation completed: Query Q101 results (...)")
+    menu = Menu("Main Menu")
+    menu.add_action("Run Action One", action_one)
+    menu.add_action("Run Action Two", action_two)
+    menu.add_action("Exit", lambda: exit())
 
-   except Exception as e:
-       ASCIIColors.fail(f"Animation failed: {e}")
-       # Optionally log the failure using the logging system
-       # logging.exception(f"Database query {query_to_run} failed")
+    menu.run()
 
-**Trace Exception (`trace_exception`)**
-***************************************
+    # Choice menu (returns selected value)
+    menu = Menu("Select an option", mode='return')
+    menu.add_choice("Option A", value="a")
+    menu.add_choice("Option B", value="b")
+    menu.add_choices([
+        ("Option C", "c"),
+        ("Option D", "d")
+    ])
 
-A convenience function to log an exception and its traceback using the configured logging system at the `ERROR` level.
+    result = menu.run()  # Returns "a", "b", "c", or "d"
+
+    # With filtering
+    menu = Menu("Search", enable_filtering=True)
+    menu.add_action("Apple", lambda: None)
+    menu.add_action("Banana", lambda: None)
+    menu.add_action("Cherry", lambda: None)
+    # User can type to filter items
+
+    # Submenus
+    sub_menu = Menu("Settings")
+    sub_menu.add_action("Option 1", lambda: None)
+
+    main_menu = Menu("Main")
+    main_menu.add_submenu("Settings", sub_menu)
+
+Interactive Prompts (Questionary-Compatible)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Drop-in replacement for the `questionary` library with enhanced styling:
 
 .. code-block:: python
-   :caption: utility_trace_exception.py
-   :linenos:
 
-   import ascii_colors as logging
-   from ascii_colors import trace_exception
+    from ascii_colors import questionary  # or: from ascii_colors.questionary_compat import text, confirm, select
 
-   # Assumes logging is configured
-   logging.basicConfig(level=logging.INFO)
+    # Text input
+    name = questionary.text("What's your name?", default="Anonymous").ask()
 
-   try:
-       value = int("not_a_number")
-   except ValueError as e:
-       # Instead of logger.error("...", exc_info=True) or logger.exception(...)
-       trace_exception(e) # Logs the error message and full traceback
+    # Password (hidden input with optional confirmation)
+    password = questionary.password("Enter password", confirm=True).ask()
+
+    # Confirm (yes/no)
+    proceed = questionary.confirm("Continue?", default=True).ask()
+
+    # Select from list (with arrow key navigation)
+    color = questionary.select(
+        "Favorite color?",
+        choices=["Red", "Green", "Blue"],
+        default="Blue"
+    ).ask()
+
+    # Multi-select checkbox
+    toppings = questionary.checkbox(
+        "Select toppings",
+        choices=["Cheese", "Pepperoni", "Mushrooms", "Olives"],
+        default=["Cheese"]  # Pre-selected
+    ).ask()  # Returns list of selected values
+
+    # Autocomplete
+    city = questionary.autocomplete(
+        "Enter city",
+        choices=["New York", "Los Angeles", "Chicago", "Houston"],
+        ignore_case=True,
+        match_middle=True
+    ).ask()
+
+    # Forms (sequence of questions)
+    answers = questionary.form(
+        questionary.text("First name"),
+        questionary.text("Last name"),
+        questionary.confirm("Subscribe to newsletter?", default=False)
+    ).ask()
+    # Returns: {"First name": "...", "Last name": "...", "Subscribe to newsletter?": True/False}
+
+    # Validation
+    from ascii_colors.questionary_compat import Validator, ValidationError
+
+    class EmailValidator(Validator):
+        def validate(self, document):
+            if "@" not in document:
+                raise ValidationError("Please enter a valid email")
+
+    email = questionary.text("Email:", validate=EmailValidator()).ask()
+
+    # Conditional questions with skip_if
+    is_company = questionary.confirm("Is this a company account?").ask()
+
+    company_name = questionary.text(
+        "Company name:"
+    ).skip_if(not is_company, default="N/A").ask()
+
+Direct API (alternative import style):
+
+.. code-block:: python
+
+    from ascii_colors.questionary_compat import text, password, confirm, select, checkbox, autocomplete, form
+
+    # Same usage as above
+    name = text("Name?").ask()
+
+Animation and User Feedback
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Execute functions with animation:
+
+.. code-block:: python
+
+    def long_running_task():
+        import time
+        time.sleep(2)
+        return "Result"
+
+    # Shows spinner animation while function runs
+    result = ASCIIColors.execute_with_animation(
+        "Processing...",
+        long_running_task,
+        color=ASCIIColors.color_yellow
+    )
+    # Prints ✓ on success, ✗ on failure with exception re-raised
+
+Confirmation and Input Helpers
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Simple built-in helpers:
+
+.. code-block:: python
+
+    # Yes/No confirmation
+    if ASCIIColors.confirm("Delete file?", default_yes=False):
+        delete_file()
+
+    # Prompt with styling
+    name = ASCIIColors.prompt("Your name: ", color=ASCIIColors.color_green)
+    password = ASCIIColors.prompt("Password: ", hide_input=True)
+
+Logging System
+--------------
+
+Basic Logging
+~~~~~~~~~~~~~
+
+Use the native API or the standard-library-compatible API:
+
+.. code-block:: python
+
+    # Native API
+    from ascii_colors import ASCIIColors
+
+    ASCIIColors.set_log_level(ASCIIColors.LogLevel.DEBUG)
+    ASCIIColors.debug("Debug message")
+    ASCIIColors.info("Info message")
+    ASCIIColors.warning("Warning message")
+    ASCIIColors.error("Error message")
+    ASCIIColors.critical("Critical message")
+
+    # Standard library compatible API
+    import logging
+    from ascii_colors import getLogger, basicConfig
+
+    basicConfig(level=logging.DEBUG, format="%(levelname)s: %(message)s")
+    logger = getLogger("myapp")
+
+    logger.info("Application started")
+    logger.error("An error occurred: %s", error_details)
+
+Contextual Logging
+~~~~~~~~~~~~~~~~~~
+
+Add context fields to all log messages in a scope:
+
+.. code-block:: python
+
+    from ascii_colors import ASCIIColors, Formatter
+
+    # Set global context
+    ASCIIColors.set_context(user_id="12345", session="abc")
+
+    # Use in formatter
+    fmt = Formatter("{asctime} [{levelname}] user={user_id} session={session}: {message}")
+    # All logs will now include user_id and session
+
+    # Temporary context (context manager)
+    with ASCIIColors.context(request_id="xyz789"):
+        ASCIIColors.info("Processing request")  # Includes request_id
+    # request_id no longer included
+
+Advanced Formatters
+~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+    from ascii_colors import Formatter, JSONFormatter
+
+    # Percent style (like standard logging)
+    percent_fmt = Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+
+    # Brace style (Python format strings)
+    brace_fmt = Formatter("{asctime} [{levelname:>8}] {message}", style='{')
+
+    # Include source location
+    source_fmt = Formatter(
+        "[{func_name}:{lineno}] {message}",
+        include_source=True,
+        style='{'
+    )
+
+    # JSON output
+    json_fmt = JSONFormatter(
+        include_fields=["timestamp", "levelname", "name", "message", "user_id"]
+    )
+
+File and Rotation Handlers
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+    from ascii_colors import FileHandler, RotatingFileHandler, Formatter
+
+    # Simple file handler
+    file_handler = FileHandler(
+        "app.log",
+        mode='a',  # 'a' for append, 'w' for overwrite
+        formatter=Formatter("%(asctime)s - %(message)s")
+    )
+    ASCIIColors.add_handler(file_handler)
+
+    # Rotating file handler (rotates when file reaches size)
+    rotate_handler = RotatingFileHandler(
+        "app.log",
+        maxBytes=1024 * 1024,  # 1 MB
+        backupCount=5,  # Keep 5 backup files
+        formatter=Formatter("%(asctime)s - %(message)s")
+    )
+    ASCIIColors.add_handler(rotate_handler)
+
+Exception Handling
+~~~~~~~~~~~~~~~~~~
+
+Format and log exceptions with enhanced tracebacks:
+
+.. code-block:: python
+
+    from ascii_colors import trace_exception, get_trace_exception
+
+    try:
+        risky_operation()
+    except Exception as e:
+        # Log with standard traceback
+        trace_exception(e, enhanced=False)
+
+        # Or get enhanced formatted traceback with context
+        formatted = get_trace_exception(e, enhanced=True, max_width=120)
+        print(formatted)  # Beautiful boxed traceback with local variables
+
+        # Direct logging
+        ASCIIColors.error("Operation failed: %s", e, exc_info=True)
+
+Migrating from Standard Logging
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Replace `logging` imports with `ascii_colors` equivalents:
+
+.. code-block:: python
+
+    # Before
+    import logging
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger("myapp")
+
+    # After
+    from ascii_colors import basicConfig, getLogger, INFO
+    basicConfig(level=INFO)
+    logger = getLogger("myapp")
+
+    # Or use native API for more control
+    from ascii_colors import ASCIIColors, ConsoleHandler, FileHandler, Formatter
+
+    ASCIIColors.clear_handlers()
+    ASCIIColors.add_handler(ConsoleHandler(formatter=Formatter("{level_name}: {message}")))
+    ASCIIColors.add_handler(FileHandler("app.log"))
+    ASCIIColors.set_log_level(ASCIIColors.LogLevel.DEBUG)
+
+Thread Safety
+~~~~~~~~~~~~~
+
+All logging operations are thread-safe. Context variables are stored per-thread:
+
+.. code-block:: python
+
+    import threading
+
+    def worker(thread_id):
+        ASCIIColors.set_context(thread=thread_id)
+        ASCIIColors.info("Message from thread")  # Includes correct thread id
+
+    for i in range(5):
+        threading.Thread(target=worker, args=(i,)).start()
+
+Configuration Presets
+~~~~~~~~~~~~~~~~~~~~~
+
+Common configuration patterns:
+
+.. code-block:: python
+
+    # Development: verbose console output
+    from ascii_colors import basicConfig, DEBUG
+    basicConfig(
+        level=DEBUG,
+        format="%(asctime)s [%(levelname)8s] %(name)s: %(message)s",
+        datefmt="%H:%M:%S"
+    )
+
+    # Production: JSON to file, errors to console
+    from ascii_colors import ASCIIColors, JSONFormatter, FileHandler, ConsoleHandler
+
+    ASCIIColors.add_handler(FileHandler(
+        "app.jsonl",
+        formatter=JSONFormatter(include_fields=["timestamp", "level", "name", "message"])
+    ))
+    ASCIIColors.add_handler(ConsoleHandler(
+        level=ASCIIColors.LogLevel.WARNING,
+        formatter=Formatter("{level_name}: {message}")
+    ))
