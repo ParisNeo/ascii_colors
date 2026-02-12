@@ -17,21 +17,23 @@ from ascii_colors.progress import ProgressBar
 from ascii_colors.menu import Menu, MenuItem
 
 # Logging compatibility
-from ascii_colors.logging_compat import (
+from ascii_colors.logging import (
     getLogger, basicConfig, shutdown, _logger_cache, _AsciiLoggerAdapter
 )
 
 # Questionary compatibility (interactive prompts)
-from ascii_colors.questionary_compat import (
+# Note: Text here is PromptText (question input), not rich.Text (styled text)
+from ascii_colors.questionary import (
     # Classes
-    Question, Text, Password, Confirm, Select, Checkbox, Autocomplete, 
+    PromptText,  # The actual class, renamed to avoid conflict with rich.Text
+    Password, Confirm, Select, Checkbox, Autocomplete, 
     Form, Validator, ValidationError,
     # Functions
-    text, password, confirm, select, checkbox, autocomplete, form, ask,
+    password, confirm, select, checkbox, autocomplete, form, ask,
 )
 
 # Rich library compatibility (new!)
-from ascii_colors.rich_compat import (
+from ascii_colors.rich import (
     # Core classes
     Console, Text as RichText, Style, Renderable, ConsoleOptions, Measurement,
     # Layout
@@ -52,11 +54,17 @@ from ascii_colors.rich_compat import (
     rule as rich_rule,
 )
 
+from ascii_colors.rich.text import Text
+
 # Create questionary module alias for drop-in replacement
 class _QuestionaryModule:
     """Module-like object for drop-in questionary compatibility."""
     def __init__(self):
-        self.Text = Text
+        # Import here to avoid circular imports
+        from ascii_colors.questionary import PromptText, Password, Confirm, Select, Checkbox, Autocomplete, Form, Validator, ValidationError, text, password, confirm, select, checkbox, autocomplete, form, ask
+        
+        # Use PromptText as Text for questionary API compatibility
+        self.Text = PromptText
         self.Password = Password
         self.Confirm = Confirm
         self.Select = Select
@@ -65,6 +73,7 @@ class _QuestionaryModule:
         self.Form = Form
         self.Validator = Validator
         self.ValidationError = ValidationError
+        # Function aliases
         self.text = text
         self.password = password
         self.confirm = confirm
@@ -100,7 +109,8 @@ __all__ = [
     "_logger_cache", "_AsciiLoggerAdapter",
     # Questionary compat
     "questionary",  # Module-like object for `from ascii_colors import questionary`
-    "Question", "Text", "Password", "Confirm", "Select", "Checkbox", 
+    "PromptText",  # Explicit name for questionary text input class
+    "Password", "Confirm", "Select", "Checkbox", 
     "Autocomplete", "Form", "Validator", "ValidationError",
     "text", "password", "confirm", "select", "checkbox", "autocomplete", 
     "form", "ask",

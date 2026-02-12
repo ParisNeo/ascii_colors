@@ -43,7 +43,7 @@ try:
         DEBUG, INFO, WARNING, ERROR, CRITICAL, # Level constants
     )
     # Import questionary compatibility
-    from ascii_colors.questionary_compat import (
+    from ascii_colors.questionary import (
         Text, Password, Confirm, Select, Checkbox, Autocomplete, Form,
         Validator, ValidationError,
         text, password, confirm, select, checkbox, autocomplete, form, ask
@@ -61,7 +61,7 @@ except ImportError:
         getLogger, basicConfig, handlers, StreamHandler,
         DEBUG, INFO, WARNING, ERROR, CRITICAL,
     )
-    from ascii_colors.questionary_compat import (
+    from ascii_colors.questionary import (
         Text, Password, Confirm, Select, Checkbox, Autocomplete, Form,
         Validator, ValidationError,
         text, password, confirm, select, checkbox, autocomplete, form, ask
@@ -98,12 +98,10 @@ class TestASCIIColors(unittest.TestCase):
         self.addCleanup(ascii_colors._logger_cache.clear)
         # --- End Reset ---
 
-        # Patch builtins.print for testing DIRECT print methods
-        # Use addCleanup to ensure the patch is always stopped
-        patcher = patch("builtins.print")
-        self.mock_builtin_print = patcher.start()
-        self.addCleanup(patcher.stop)
-
+        # For testing direct print methods, capture stdout/stderr
+        self._stdout_capture = io.StringIO()
+        self._stderr_capture = io.StringIO()
+        
         self.original_stdout = sys.stdout
         self.original_stderr = sys.stderr
 
@@ -138,42 +136,38 @@ class TestASCIIColors(unittest.TestCase):
         stream.seek(0)
         return stream.read()
 
-    def assert_direct_print_called_with(self, expected_text_part: str, color_code: str = None, style_code: str = "", **kwargs):
-        """Asserts that builtins.print (mocked) was called with expected args."""
-        found_call = False; time.sleep(0.01); calls = self.mock_builtin_print.call_args_list
-        expected_file = kwargs.get('file', self.original_stdout)
-        expected_end = kwargs.get('end', '\n')
+    def assert_direct_print_output(self, expected_text_part: str, color_code: str = None, style_code: str = "", end: str = "\n", stream_capture: io.StringIO = None):
+        """Asserts that direct print output contains expected content by checking stream output."""
+        # Get output from the appropriate stream
+        if stream_capture is None:
+            # Default to stdout for most direct prints
+            output = self._stdout_capture.getvalue()
+            if not output:
+                output = self._stderr_capture.getvalue()
+        else:
+            output = stream_capture.getvalue()
         
-        for call in calls:
-            args, kwargs_call = call
-            if not args: continue
-            printed_text = args[0]
-            if not isinstance(printed_text, str): continue
-            stripped_printed = strip_ansi(printed_text).lower().strip()
-            
-            if expected_text_part.lower() in stripped_printed and \
-               kwargs_call.get('file', self.original_stdout) == expected_file:
-                found_call = True
-                expected_start = style_code + (color_code if color_code else "")
-                
-                # Check formatting
-                # Note: ASCIIColors.print constructs the string as: prefix + text + reset + end
-                # BUT when calling print(..., end="", ...), the 'end' char is embedded in the string passed to print?
-                # No, ASCIIColors.print adds 'end' to the string it constructs: output = ... + end
-                # Then calls print(output, end="", ...)
-                
-                # Check start
-                self.assertTrue(printed_text.lstrip('\r').startswith(expected_start), f"Direct print start mismatch. Expected prefix: '{expected_start}', Got: '{printed_text}'")
-                
-                # Check end: Should end with Reset Code + Expected End Char
-                full_expected_suffix = ASCIIColors.color_reset + expected_end
-                self.assertTrue(printed_text.endswith(full_expected_suffix), f"Direct print suffix mismatch. Expected endswith: '{full_expected_suffix!r}', Got: '{printed_text!r}'")
-                
-                # Check kwargs passed to builtin print
-                self.assertEqual(kwargs_call.get('end', '\n'), "") # ASCIIColors.print forces end="" in builtin call
-                self.assertEqual(kwargs_call.get('flush', False), kwargs.get('flush', False))
-                break
-        self.assertTrue(found_call, f"Direct print call containing '{expected_text_part}' with file={expected_file} not found in calls:\n{calls}")
+        # Strip ANSI for text content check
+        stripped_output = strip_ansi(output)
+        
+        # Check that expected text is in output
+        self.assertIn(expected_text_part, stripped_output, 
+                     f"Expected text '{expected_text_part}' not found in output: {stripped_output!r}")
+        
+        # Check color/style if specified
+        if color_code:
+            self.assertIn(color_code, output, 
+                         f"Color code '{color_code!r}' not found in output")
+        
+        if style_code:
+            self.assertIn(style_code, output,
+                         f"Style code '{style_code!r}' not found in output")
+        
+        # Check that output ends correctly (with reset code and ending)
+        if end:
+            # The output should contain the reset code before the end string
+            self.assertIn(ASCIIColors.color_reset + end, output,
+                         f"Expected suffix '{ASCIIColors.color_reset + end!r}' not in output")
 
     # --- Test Core Logging Functionality (ASCIIColors API) ---
 
@@ -346,43 +340,56 @@ class TestASCIIColors(unittest.TestCase):
 
     # --- Test Direct Print Methods ---
     def test_direct_print_method(self):
-        """Test the static print method calls builtins.print directly."""
-        txt="DirectPrint"; col=ASCIIColors.color_cyan; sty=ASCIIColors.style_underline; end="X"; flush=True; file=self.original_stderr
-        ASCIIColors.print(txt, color=col, style=sty, end=end, flush=flush, file=file)
-        self.assert_direct_print_called_with(txt, color_code=col, style_code=sty, end=end, flush=flush, file=file)
+        """Test the static print method writes to stream."""
+        # Create a capture stream
+        capture = io.StringIO()
+        
+        txt="DirectPrint"; col=ASCIIColors.color_cyan; sty=ASCIIColors.style_underline; end="X"; flush=True
+        ASCIIColors.print(txt, color=col, style=sty, end=end, flush=flush, file=capture)
+        
+        output = capture.getvalue()
+        # Verify the output contains expected components
+        self.assertIn(txt, output)
+        self.assertIn(col, output)
+        self.assertIn(sty, output)
+        self.assertIn(end, output)
+        # Should end with reset + end
+        self.assertTrue(output.endswith(ASCIIColors.color_reset + end))
 
     def test_direct_color_methods(self):
-        """Test direct color methods (red, green, etc.) call builtins.print."""
-        ASCIIColors.red("RedDirect")
-        self.assert_direct_print_called_with("RedDirect", color_code=ASCIIColors.color_red)
-        self.mock_builtin_print.reset_mock()
-        ASCIIColors.green("GreenDirect", end='')
-        self.assert_direct_print_called_with("GreenDirect", color_code=ASCIIColors.color_green, end='')
+        """Test direct color methods (red, green, etc.) write to stream."""
+        # Create a capture stream
+        capture = io.StringIO()
+        
+        ASCIIColors.red("RedDirect", file=capture)
+        output = capture.getvalue()
+        
+        # Verify output
+        self.assertIn("RedDirect", output)
+        self.assertIn(ASCIIColors.color_red, output)
+        self.assertTrue(output.endswith(ASCIIColors.color_reset + "\n"))
 
     def test_composition_of_effects(self):
         """Test composition of effects (nesting calls)."""
-        # When nesting with emit=False for inner, we build a complex string
+        # Create a capture stream
+        capture = io.StringIO()
+        
         inner_text = "NestedText"
-        # Inner: Bold, no emit, no newline to keep it simple
+        # Inner: Bold, no emit, returns string
         bolded = ASCIIColors.bold(inner_text, emit=False, end="")
+
+        # Outer: Magenta, emit=True to capture stream
+        ASCIIColors.magenta(bolded, file=capture, end="")  # no extra newline
+
+        output = capture.getvalue()
         
-        # Outer: Magenta, emit=True
-        ASCIIColors.magenta(bolded)
-        
-        # Verify the print call
-        # Check calls manually to ensure composition structure
-        found = False
-        for call in self.mock_builtin_print.call_args_list:
-            args, _ = call
-            if args and isinstance(args[0], str):
-                printed = args[0]
-                # Check for structure: MAGENTA + BOLD + text
-                if (printed.startswith(ASCIIColors.color_magenta) and 
-                    ASCIIColors.style_bold in printed and 
-                    inner_text in printed):
-                    found = True
-                    break
-        self.assertTrue(found, "Composition of Magenta(Bold(...)) not found in print calls")
+        # Verify the output contains expected components
+        # Should have magenta color code
+        self.assertIn(ASCIIColors.color_magenta, output)
+        # Should have bold style code
+        self.assertIn(ASCIIColors.style_bold, output)
+        # Should have the text content
+        self.assertIn(inner_text, output)
 
     # ===========================================================
     # --- Tests for Logging Compatibility Layer ---

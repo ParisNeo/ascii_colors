@@ -105,24 +105,44 @@ class Menu:
                 return 'QUIT'
         return _get_key()
     
+    def _clear_screen(self) -> None:
+        """Clear the screen in a cross-platform way."""
+        # Use ANSI escape codes first
+        print("\033[2J\033[H", end="")
+        # Also try Windows-specific clear if needed
+        if sys.platform == 'win32':
+            try:
+                import os
+                os.system('cls')
+            except:
+                pass
+        # Flush to ensure it's applied
+        sys.stdout.flush()
+    
     def _display(self, items: List[MenuItem]) -> None:
         """Render the menu display."""
         if self.clear_screen:
-            print("\033[H\033[J", end="")
+            self._clear_screen()
         
-        # Title
+        # Title - process rich markup
         title_color = ANSI.color_bright_yellow
-        ASCIIColors.print(self.title, color=title_color, style=ANSI.style_bold)
-        print("-" * len(strip_ansi(self.title)))
+        title_processed = ASCIIColors._apply_rich_markup(self.title)
+        ASCIIColors.print(title_processed, color=title_color, style=ANSI.style_bold, markup=False)
         
-        # Instructions based on mode
+        # Title underline
+        title_plain = strip_ansi(title_processed)
+        print("-" * len(title_plain))
+        
+        # Instructions based on mode - process rich markup
         if self.mode == self.MODE_CHECKBOX:
-            ASCIIColors.print("↑↓ navigate • Space toggle • Enter confirm • a toggle all", 
-                            color=ANSI.style_dim)
+            instruction = "↑↓ navigate • Space toggle • Enter confirm • a toggle all"
+            ASCIIColors.print(ASCIIColors._apply_rich_markup(instruction), color=ANSI.style_dim, markup=False)
         elif self.mode in (self.MODE_SELECT, self.MODE_RETURN):
-            ASCIIColors.print("↑↓ navigate • Enter select • q cancel", color=ANSI.style_dim)
+            instruction = "↑↓ navigate • Enter select • q cancel"
+            ASCIIColors.print(ASCIIColors._apply_rich_markup(instruction), color=ANSI.style_dim, markup=False)
         else:
-            ASCIIColors.print("↑↓ navigate • Enter select • q quit", color=ANSI.style_dim)
+            instruction = "↑↓ navigate • Enter select • q quit"
+            ASCIIColors.print(ASCIIColors._apply_rich_markup(instruction), color=ANSI.style_dim, markup=False)
         print()
         
         for i, item in enumerate(items):
@@ -146,24 +166,32 @@ class Menu:
             if item.is_input and item.input_value:
                 content += f" [{item.input_value}]"
             
+            # Process rich markup in content
+            content = ASCIIColors._apply_rich_markup(content)
+            
             # Apply colors
             if item.disabled:
                 display = f"{prefix}{ANSI.style_dim}{content} (disabled){ANSI.color_reset}"
             elif is_selected:
                 if item.custom_color:
-                    display = f"{prefix}{item.custom_color}{content}{ANSI.color_reset}"
+                    custom_processed = ASCIIColors._apply_rich_markup(item.custom_color)
+                    display = f"{prefix}{custom_processed}{content}{ANSI.color_reset}"
                 else:
+                    # Highlight selected item with cyan background
                     display = f"{prefix}{ANSI.color_bg_cyan}{ANSI.color_black} {content} {ANSI.color_reset}"
             else:
                 if item.custom_color:
-                    display = f"{prefix}{item.custom_color}{content}{ANSI.color_reset}"
+                    custom_processed = ASCIIColors._apply_rich_markup(item.custom_color)
+                    display = f"{prefix}{custom_processed}{content}{ANSI.color_reset}"
                 else:
                     display = f"{prefix}{content}"
             
-            ASCIIColors.print(display, color="")  # Use print directly
+            # Print with markup=False since we've already processed it
+            print(display)
         
         if self.enable_filtering:
-            ASCIIColors.print(f"\nFilter: {self._filter}_", color="")
+            filter_text = f"\nFilter: {self._filter}_"
+            ASCIIColors.print(ASCIIColors._apply_rich_markup(filter_text), color="", markup=False)
     
     def run(self) -> Any:
         """Run the menu and return result based on mode."""

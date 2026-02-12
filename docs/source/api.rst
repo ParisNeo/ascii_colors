@@ -203,7 +203,7 @@ Questionary Compatibility
 
 Drop-in replacement for the `questionary` library.
 
-.. autoclass:: ascii_colors.questionary_compat.Question
+.. autoclass:: ascii_colors.questionary.Question
    :members:
    :undoc-members:
 
@@ -211,31 +211,31 @@ Drop-in replacement for the `questionary` library.
    .. automethod:: unsafe_ask
    .. automethod:: skip_if
 
-.. autoclass:: ascii_colors.questionary_compat.Text
+.. autoclass:: ascii_colors.questionary.Text
    :show-inheritance:
    :members:
 
-.. autoclass:: ascii_colors.questionary_compat.Password
+.. autoclass:: ascii_colors.questionary.Password
    :show-inheritance:
    :members:
 
-.. autoclass:: ascii_colors.questionary_compat.Confirm
+.. autoclass:: ascii_colors.questionary.Confirm
    :show-inheritance:
    :members:
 
-.. autoclass:: ascii_colors.questionary_compat.Select
+.. autoclass:: ascii_colors.questionary.Select
    :show-inheritance:
    :members:
 
-.. autoclass:: ascii_colors.questionary_compat.Checkbox
+.. autoclass:: ascii_colors.questionary.Checkbox
    :show-inheritance:
    :members:
 
-.. autoclass:: ascii_colors.questionary_compat.Autocomplete
+.. autoclass:: ascii_colors.questionary.Autocomplete
    :show-inheritance:
    :members:
 
-.. autoclass:: ascii_colors.questionary_compat.Form
+.. autoclass:: ascii_colors.questionary.Form
    :members:
    :undoc-members:
 
@@ -244,31 +244,31 @@ Drop-in replacement for the `questionary` library.
 Validation
 ~~~~~~~~~~
 
-.. autoclass:: ascii_colors.questionary_compat.Validator
+.. autoclass:: ascii_colors.questionary.Validator
    :members:
    :undoc-members:
 
-.. autoclass:: ascii_colors.questionary_compat.ValidationError
+.. autoclass:: ascii_colors.questionary.ValidationError
    :show-inheritance:
 
 Convenience Functions
 ~~~~~~~~~~~~~~~~~~~~~
 
-.. autofunction:: ascii_colors.questionary_compat.text
+.. autofunction:: ascii_colors.questionary.text
 
-.. autofunction:: ascii_colors.questionary_compat.password
+.. autofunction:: ascii_colors.questionary.password
 
-.. autofunction:: ascii_colors.questionary_compat.confirm
+.. autofunction:: ascii_colors.questionary.confirm
 
-.. autofunction:: ascii_colors.questionary_compat.select
+.. autofunction:: ascii_colors.questionary.select
 
-.. autofunction:: ascii_colors.questionary_compat.checkbox
+.. autofunction:: ascii_colors.questionary.checkbox
 
-.. autofunction:: ascii_colors.questionary_compat.autocomplete
+.. autofunction:: ascii_colors.questionary.autocomplete
 
-.. autofunction:: ascii_colors.questionary_compat.form
+.. autofunction:: ascii_colors.questionary.form
 
-.. autofunction:: ascii_colors.questionary_compat.ask
+.. autofunction:: ascii_colors.questionary.ask
 
 Module-Level Access
 ~~~~~~~~~~~~~~~~~~~

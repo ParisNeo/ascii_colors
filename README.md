@@ -458,7 +458,7 @@ email = questionary.text(
 ).ask()
 
 # Using Validator class
-from ascii_colors.questionary_compat import Validator, ValidationError
+from ascii_colors.questionary import Validator, ValidationError
 
 class NonEmptyValidator(Validator):
     def validate(self, document):
@@ -583,7 +583,7 @@ company_name = questionary.text(
 # Direct API Alternative
 # ============================================
 
-from ascii_colors.questionary_compat import text, password, confirm, select, checkbox
+from ascii_colors.questionary import text, password, confirm, select, checkbox
 
 # Same usage, slightly different import
 name = text("Name?").ask()

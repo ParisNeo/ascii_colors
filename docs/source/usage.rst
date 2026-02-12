@@ -161,7 +161,7 @@ Drop-in replacement for the `questionary` library with enhanced styling:
 
 .. code-block:: python
 
-    from ascii_colors import questionary  # or: from ascii_colors.questionary_compat import text, confirm, select
+    from ascii_colors import questionary  # or: from ascii_colors.questionary import text, confirm, select
 
     # Text input
     name = questionary.text("What's your name?", default="Anonymous").ask()
@@ -203,7 +203,7 @@ Drop-in replacement for the `questionary` library with enhanced styling:
     # Returns: {"First name": "...", "Last name": "...", "Subscribe to newsletter?": True/False}
 
     # Validation
-    from ascii_colors.questionary_compat import Validator, ValidationError
+    from ascii_colors.questionary import Validator, ValidationError
 
     class EmailValidator(Validator):
         def validate(self, document):
@@ -223,7 +223,7 @@ Direct API (alternative import style):
 
 .. code-block:: python
 
-    from ascii_colors.questionary_compat import text, password, confirm, select, checkbox, autocomplete, form
+    from ascii_colors.questionary import text, password, confirm, select, checkbox, autocomplete, form
 
     # Same usage as above
     name = text("Name?").ask()

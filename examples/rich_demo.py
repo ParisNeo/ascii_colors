@@ -25,7 +25,7 @@ def demo_panels():
     
     # Styled panel
     panel = Panel(
-        "This is important information that needs to stand out.",
+        "This is important information that needs to stand out.\nTesting more",
         title="[bold yellow]Warning[/bold yellow]",
         border_style="bold yellow",
         box=BoxStyle.ROUND,
@@ -45,8 +45,9 @@ def demo_panels():
     print()
     
     # Using ASCIIColors convenience method - print directly
-    result = ASCIIColors.panel("Quick panel via ASCIIColors.panel()", title="Convenience", border_style="cyan")
-    print(result)  # Print the returned string
+    result = ASCIIColors.panel("Quick panel via ASCIIColors.panel()", title="Convenience", border_style="red bold")
+    result = ASCIIColors.panel("Quick panel via ASCIIColors.panel()", title="Convenience", border_style="red")
+    
 
 
 def demo_tables():
@@ -217,7 +218,7 @@ def demo_live():
     print("\n")
     rich.rule("LIVE DISPLAY", style="bold magenta")
     
-    from ascii_colors.rich_compat import Live, Text
+    from ascii_colors.rich import Live, Text
     
     # Simulate a process with live updates
     with Live(Text("Starting process..."), refresh_per_second=4) as live:

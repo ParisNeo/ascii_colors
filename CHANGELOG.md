@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - chore(release): bump version to 0.11.6 and update .gitignore
 
+## [2026-02-12 08:37]
+
+- refactor!: rename compatibility modules and remove _compat suffix
+
 ## [2026-02-10 13:48]
 
 - refactor: Simplify library structure and overhaul documentation

@@ -113,9 +113,49 @@ class ASCIIColors(ANSI):
     def critical(cls, m: str, *a, **k): cls._log(LogLevel.CRITICAL, m, a, **k)
 
     @staticmethod
-    def print(text: str, color: str = ANSI.color_white, style: str = "", background: str = "", end: str = "\n", flush: bool = False, file: Any = sys.stdout, emit: bool = True) -> str:
-        out = f"{style}{background}{color}{text}{ANSI.color_reset}{end}"
-        if emit: print(out, end="", flush=flush, file=file)
+    def _apply_rich_markup(text: str) -> str:
+        """Apply rich markup tags like [red], [bold], etc. to text."""
+        if not text or "[" not in text:
+            return text
+            
+        # Check if rich module is available
+        try:
+            # Import here to avoid circular imports
+            from ascii_colors.rich.console import Console
+            # Create a minimal console just for markup processing
+            console = Console(force_terminal=True, no_color=False)
+            return console._apply_markup(text)
+        except Exception:
+            # If rich fails, return text as-is
+            return text
+
+    @staticmethod
+    def print(text: str, color: str = ANSI.color_white, style: str = "", background: str = "", end: str = "\n", flush: bool = False, file: Any = sys.stdout, emit: bool = True, markup: bool = True) -> str:
+        """
+        Print text with optional rich markup support.
+        
+        Args:
+            text: The text to print
+            color: Foreground color ANSI code
+            style: Style ANSI code (bold, italic, etc.)
+            background: Background color ANSI code
+            end: String to append at the end
+            flush: Whether to flush the output
+            file: Output stream
+            emit: Whether to actually print (False returns string only)
+            markup: Whether to parse rich markup tags like [red], [bold], etc.
+        """
+        # Apply rich markup parsing if enabled
+        processed_text = text
+        if markup:
+            processed_text = ASCIIColors._apply_rich_markup(text)
+        
+        out = f"{style}{background}{color}{processed_text}{ANSI.color_reset}{end}"
+        if emit: 
+            # Use sys.stdout.write to avoid double newlines from print
+            file.write(out)
+            if flush:
+                file.flush()
         return out
 
     @staticmethod
@@ -144,25 +184,97 @@ class ASCIIColors(ANSI):
     def italic(t: str, **k): return ASCIIColors.print(t, style=ANSI.style_italic, **k)
 
     @staticmethod
-    def multicolor(texts: List[str], colors: List[str], end: str = "\n", flush: bool = False, file: Any = sys.stdout, emit: bool = True) -> None:
+    def multicolor(texts: List[str], colors: List[str], end: str = "\n", flush: bool = False, file: Any = sys.stdout, emit: bool = True, markup: bool = True) -> None:
+        """
+        Print multiple colored text segments with rich markup support.
+        
+        Args:
+            texts: List of text segments
+            colors: List of colors (one per text segment)
+            end: String to append at the end
+            flush: Whether to flush the output
+            file: Output stream
+            emit: Whether to actually print
+            markup: Whether to parse rich markup tags in each segment
+        """
         if len(texts) != len(colors): raise ValueError("Mismatch")
-        out = "".join([f"{c}{t}" for t, c in zip(texts, colors)]) + ANSI.color_reset + end
-        print(out, end="", flush=flush, file=file)
+        
+        # Process each segment for markup if enabled
+        processed_texts = []
+        for text in texts:
+            processed = ASCIIColors._apply_rich_markup(text) if markup else text
+            processed_texts.append(processed)
+        
+        out = "".join([f"{c}{t}" for t, c in zip(processed_texts, colors)]) + ANSI.color_reset + end
+        file.write(out)
+        if flush:
+            file.flush()
 
     @staticmethod
-    def highlight(text: str, subtext: Union[str, List[str]], color: str = ANSI.color_white, highlight_color: str = ANSI.color_yellow, whole_line: bool = False, end: str = "\n", flush: bool = False, file: Any = sys.stdout) -> None:
+    def highlight(text: str, subtext: Union[str, List[str]], color: str = ANSI.color_white, highlight_color: str = ANSI.color_yellow, whole_line: bool = False, end: str = "\n", flush: bool = False, file: Any = sys.stdout, markup: bool = False) -> None:
+        """
+        Highlight substrings in text with optional rich markup support.
+        
+        Args:
+            text: The text to process
+            subtext: String or list of strings to highlight
+            color: Default text color
+            highlight_color: Color for highlighted portions
+            whole_line: Whether to highlight entire lines containing subtext
+            end: String to append at the end
+            flush: Whether to flush the output
+            file: Output stream
+            markup: Whether to parse rich markup tags in the text first
+        """
         subtexts = [subtext] if isinstance(subtext, str) else subtext
+        
+        # Apply markup preprocessing if enabled
+        processed_text = ASCIIColors._apply_rich_markup(text) if markup else text
+        
         if whole_line:
             out = ""
-            for line in text.splitlines(True):
+            for line in processed_text.splitlines(True):
                 s_l = line.rstrip('\r\n')
                 c = highlight_color if any(st in s_l for st in subtexts) else color
                 out += f"{c}{s_l}{ANSI.color_reset}{line[len(s_l):]}"
         else:
-            processed = text
-            for st in subtexts: processed = processed.replace(st, f"{highlight_color}{st}{ANSI.color_reset}{color}")
-            out = f"{color}{processed}{ANSI.color_reset}"
-        print(out + end, end="", flush=flush, file=file)
+            # Need to handle already-marked-up text carefully
+            # Split by reset codes to preserve existing markup
+            parts = processed_text.split(ANSI.color_reset)
+            processed_parts = []
+            for i, part in enumerate(parts):
+                if i > 0:
+                    # Re-apply color after each reset
+                    part = color + part
+                
+                # Apply highlighting within this part
+                for st in subtexts:
+                    # Only highlight if not already colored by markup
+                    # This is a simplification - complex markup may need more handling
+                    if ANSI.color_reset not in part and st in part:
+                        part = part.replace(st, f"{highlight_color}{st}{ANSI.color_reset}{color}")
+                
+                processed_parts.append(part)
+            
+            # Join without adding extra resets
+            if len(processed_parts) > 1:
+                out = ANSI.color_reset.join(processed_parts)
+            else:
+                out = processed_parts[0] if processed_parts else processed_text
+                
+            # Ensure we start with the base color
+            if not out.startswith(ANSI.color_reset) and not any(out.startswith(c) for c in [ANSI.color_red, ANSI.color_green, ANSI.color_yellow, ANSI.color_blue, ANSI.color_magenta, ANSI.color_cyan, ANSI.color_white, ANSI.color_orange, ANSI.color_black, '\033[']):
+                out = f"{color}{out}"
+            
+            # Ensure proper reset at end
+            if not out.endswith(ANSI.color_reset):
+                out = f"{out}{ANSI.color_reset}"
+            else:
+                out = out
+        
+        file.write(out + end)
+        if flush:
+            file.flush()
 
     @staticmethod
     def execute_with_animation(pending_text: str, func: Callable[..., _T], *args: Any, color: Optional[str] = None, **kwargs: Any) -> _T:
@@ -195,12 +307,26 @@ class ASCIIColors(ANSI):
         return cast(_T, f_res)
 
     @staticmethod
-    def confirm(question: str, default_yes: Optional[bool] = None, prompt_color: str = ANSI.color_yellow, file: Any = sys.stdout) -> bool:
+    def confirm(question: str, default_yes: Optional[bool] = None, prompt_color: str = ANSI.color_yellow, file: Any = sys.stdout, markup: bool = True) -> bool:
+        """
+        Ask a yes/no confirmation question with optional rich markup support.
+        
+        Args:
+            question: The question text
+            default_yes: Default answer if user just presses Enter
+            prompt_color: Color for the prompt
+            file: Output stream
+            markup: Whether to parse rich markup tags in the question
+        """
         suff = "[Y/n]" if default_yes is True else ("[y/N]" if default_yes is False else "[y/n]")
-        p = f"{question} {suff}? "
+        
+        # Process question for markup if enabled
+        processed_question = ASCIIColors._apply_rich_markup(question) if markup else question
+        
+        p = f"{processed_question} {suff}? "
         while True:
             try:
-                ASCIIColors.print(p, color=prompt_color, end="", flush=True, file=file)
+                ASCIIColors.print(p, color=prompt_color, end="", flush=True, file=file, markup=False)  # Don't re-process markup in prompt
                 c = input().lower().strip()
                 if c in ('y', 'yes'): return True
                 if c in ('n', 'no'): return False
@@ -209,12 +335,45 @@ class ASCIIColors(ANSI):
             except KeyboardInterrupt: return False
 
     @staticmethod
-    def prompt(text: str, color: str = ANSI.color_green, style: str = "", hide_input: bool = False, file: Any = sys.stdout) -> str:
-        full = f"{style}{color}{text}{ANSI.color_reset}"
+    def prompt(text: str, color: str = ANSI.color_green, style: str = "", hide_input: bool = False, file: Any = sys.stdout, markup: bool = True) -> str:
+        """
+        Prompt for user input with optional rich markup support.
+        
+        Args:
+            text: The prompt text
+            color: Color for the prompt
+            style: Style for the prompt
+            hide_input: Whether to hide the input (for passwords)
+            file: Output stream
+            markup: Whether to parse rich markup tags in the prompt text
+        """
+        # Process prompt for markup if enabled
+        processed_text = ASCIIColors._apply_rich_markup(text) if markup else text
+        
+        full = f"{style}{color}{processed_text}{ANSI.color_reset}"
         try:
             print(full, end="", flush=True, file=file)
             return getpass.getpass(prompt="") if hide_input else input()
         except KeyboardInterrupt: print(file=file); return ""
+
+    # ============== Rich-style markup printing ==============
+
+    @staticmethod
+    def rich_print(text: str, **kwargs: Any) -> None:
+        """Print text with rich markup support.
+        
+        Supports tags like [magenta], [bold], [success], [error], etc.
+        
+        Examples:
+            ASCIIColors.rich_print("[magenta]Hello[/magenta] [bold]World[/bold]")
+            ASCIIColors.rich_print("[success]Operation completed successfully[/success]")
+            ASCIIColors.rich_print("[error]An error occurred[/error]")
+            ASCIIColors.rich_print("[warning]Warning: deprecated feature[/warning]")
+            ASCIIColors.rich_print("[info]Note: processing started[/info]")
+        """
+        from ascii_colors.rich import Console
+        console = Console()
+        console.print(text, **kwargs)
 
     # ============== New Rich-style methods ==============
 
@@ -234,7 +393,7 @@ class ASCIIColors(ANSI):
         
         New rich-style convenience method.
         """
-        from ascii_colors.rich_compat import Panel, BoxStyle, Style, Text, Console
+        from ascii_colors.rich import Panel, BoxStyle, Style, Text, Console
         
         # Convert string box name to enum
         box_style = BoxStyle.SQUARE
@@ -294,7 +453,7 @@ class ASCIIColors(ANSI):
         
         New rich-style convenience method.
         """
-        from ascii_colors.rich_compat import Table, BoxStyle, Console
+        from ascii_colors.rich import Table, BoxStyle, Console
         
         box_style = BoxStyle.SQUARE
         try:
@@ -336,7 +495,7 @@ class ASCIIColors(ANSI):
         New rich-style convenience method.
         Returns a Tree object that can have children added.
         """
-        from ascii_colors.rich_compat import Tree, Style
+        from ascii_colors.rich import Tree, Style
         
         style_obj = Style.parse(style) if style else Style()
         guide_obj = Style.parse(guide_style) if guide_style else Style(dim=True)
@@ -355,7 +514,7 @@ class ASCIIColors(ANSI):
         
         New rich-style convenience method.
         """
-        from ascii_colors.rich_compat import Syntax, Console
+        from ascii_colors.rich import Syntax, Console
         
         syntax = Syntax(
             code,
@@ -378,7 +537,7 @@ class ASCIIColors(ANSI):
         
         New rich-style convenience method.
         """
-        from ascii_colors.rich_compat import Markdown, Console
+        from ascii_colors.rich import Markdown, Console
         
         md = Markdown(markup)
         
@@ -400,7 +559,7 @@ class ASCIIColors(ANSI):
         
         New rich-style convenience method.
         """
-        from ascii_colors.rich_compat import Columns, Text, Console
+        from ascii_colors.rich import Columns, Text, Console
         
         renderables = [Text(item) for item in items]
         cols = Columns(renderables, equal=equal, width=width)
@@ -425,7 +584,7 @@ class ASCIIColors(ANSI):
         
         New rich-style convenience method.
         """
-        from ascii_colors.rich_compat import Console, Style
+        from ascii_colors.rich import Console, Style
         
         console = Console(width=ASCIIColors._get_terminal_width())
         style_obj = Style.parse(style) if style else None
@@ -447,7 +606,7 @@ class ASCIIColors(ANSI):
             with ASCIIColors.status("Processing..."):
                 do_work()
         """
-        from ascii_colors.rich_compat import Status, Console, Style
+        from ascii_colors.rich import Status, Console, Style
         
         console = Console(width=ASCIIColors._get_terminal_width())
         style_obj = Style.parse(spinner_style) if spinner_style else Style(color=ANSI.color_green)
@@ -471,11 +630,11 @@ class ASCIIColors(ANSI):
                 while updating:
                     live.update(new_renderable)
         """
-        from ascii_colors.rich_compat import Live, Console
+        from ascii_colors.rich import Live, Console
         
         console = Console(width=ASCIIColors._get_terminal_width())
         
-        from ascii_colors.rich_compat import Text
+        from ascii_colors.rich import Text
         if isinstance(renderable, str):
             renderable = Text(renderable)
         
@@ -484,7 +643,7 @@ class ASCIIColors(ANSI):
     @staticmethod
     def _get_mini_console(width: int) -> 'Console':
         """Get a minimal console for string capture."""
-        from ascii_colors.rich_compat import Console
+        from ascii_colors.rich import Console
         return Console(width=width, force_terminal=False)
 
     @staticmethod
