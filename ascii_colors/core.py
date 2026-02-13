@@ -375,7 +375,8 @@ class ASCIIColors(ANSI):
         console = Console()
         console.print(text, **kwargs)
 
-    # ============== New Rich-style methods ==============    @staticmethod
+    # ============== New Rich-style methods ==============
+    @staticmethod
     def panel(
         content: str,
         title: Optional[str] = None,
@@ -391,7 +392,8 @@ class ASCIIColors(ANSI):
         
         New rich-style convenience method.
         """
-        from ascii_colors.rich import Panel, BoxStyle, Style, Console
+        from ascii_colors.rich import Panel, BoxStyle, Style, Console, Text
+        import re
         
         # Convert string box name to enum
         box_style = BoxStyle.SQUARE
@@ -409,39 +411,78 @@ class ASCIIColors(ANSI):
         if background:
             style_obj = Style(background=background)
         
-        # Normalize newlines and split content into lines
-        # This ensures multi-line content renders properly within panel borders
+        # Normalize newlines in content
         normalized_content = content.replace('\r\n', '\n').replace('\r', '\n')
         
-        # Apply rich markup to content - this converts [bold red] etc to ANSI codes
-        processed_content = ASCIIColors._apply_rich_markup(normalized_content)
+        # Check if content has markup tags that span multiple lines
+        # If so, apply markup to each line individually to ensure proper formatting
+        if '[/' in normalized_content and '\n' in normalized_content:
+            # Try to find outermost tags that wrap all content
+            # Pattern matches [tag]...content...[/tag] where content can span lines
+            outer_tag_pattern = r'^\[([\w\s]+)\](.*?)\[/\1\]$'
+            match = re.match(outer_tag_pattern, normalized_content, re.DOTALL)
+            
+            if match:
+                tag = match.group(1)
+                inner_content = match.group(2)
+                inner_lines = inner_content.split('\n')
+                # Wrap each inner line with the same tag, then apply markup
+                processed_lines = [ASCIIColors._apply_rich_markup(f'[{tag}]{line}[/{tag}]') for line in inner_lines]
+                processed_content = '\n'.join(processed_lines)
+            else:
+                # No simple outer tag pattern, apply markup normally
+                # This might not handle multi-line tags perfectly, but it's the best we can do
+                processed_content = ASCIIColors._apply_rich_markup(normalized_content)
+        else:
+            # No multi-line markup, apply normally
+            processed_content = ASCIIColors._apply_rich_markup(normalized_content)
         
         # Calculate appropriate width based on longest line (not total content length)
         term_width = ASCIIColors._get_terminal_width()
+        
+        # Split by newlines to find longest line for width calculation
+        content_lines = processed_content.split('\n')
+        
         # Find the longest line length (excluding ANSI codes for width calculation)
         from ascii_colors.utils import strip_ansi
-        content_lines = processed_content.split('\n')
         longest_line_len = max((len(strip_ansi(line)) for line in content_lines), default=0)
         
+        # Parse padding to get horizontal padding value
+        if isinstance(padding, int):
+            pad_x = padding
+        elif len(padding) == 2:
+            pad_x = padding[1]  # (vertical, horizontal)
+        else:
+            pad_x = padding[1]  # (top, right, bottom, left)
+        
+        # Calculate panel width: must fit longest line + 2 borders + 2*pad_x padding
+        # inner_width = panel_width - 2 (borders)
+        # content_width = inner_width - 2*pad_x = panel_width - 2 - 2*pad_x
+        # We need content_width >= longest_line_len
+        # So: panel_width >= longest_line_len + 2 + 2*pad_x
+        min_panel_width = longest_line_len + 2 + 2 * pad_x
+        
         if width is None:
-            # Account for padding, borders, and some margin
-            panel_width = min(term_width - 4, max(40, longest_line_len + 4))
+            # Use min of: terminal width minus margin, or calculated minimum
+            panel_width = min(term_width - 4, max(40, min_panel_width))
         else:
             panel_width = min(width, term_width - 2)
         
-        # Ensure panel is wide enough for the longest line plus padding
-        min_content_width = longest_line_len + 4  # 2 for borders, 2 for minimum padding
-        panel_width = max(panel_width, min_content_width)
+        # Ensure panel is wide enough for the longest line plus borders and padding
+        panel_width = max(panel_width, min_panel_width)
         
         # Apply rich markup to title if provided
         processed_title = None
         if title:
             processed_title = ASCIIColors._apply_rich_markup(title)
         
-        # Create Panel with the pre-processed content string
-        # Pass as string so Panel.__rich_console__ handles ANSI preservation correctly
+        # Create a Text object with no_wrap=True to prevent re-wrapping
+        # This tells Panel to respect the explicit newlines in the content
+        text_obj = Text(processed_content, no_wrap=True)
+        
+        # Create Panel with the Text object
         panel = Panel(
-            processed_content,  # String with ANSI codes already applied
+            text_obj,
             title=processed_title,
             border_style=style_obj,
             box=box_style,

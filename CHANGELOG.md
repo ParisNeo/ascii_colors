@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - chore(release): bump version to 0.11.6 and update .gitignore
 
+## [2026-02-13 14:35]
+
+- feat(rich): add Rich-style panel rendering with multi-line support
+
 ## [2026-02-13 13:58]
 
 - chore: bump version to 0.11.10 and clean up formatting

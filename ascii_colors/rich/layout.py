@@ -119,47 +119,60 @@ class Panel:
         # Render content to list of strings first to properly handle multi-line
         content_lines: List[str] = []
         
-        if isinstance(self.renderable, Text):
-            # For Text objects, render with the console to get lines
-            rendered = console.render(self.renderable, options.update_width(content_width))
-            for item in rendered:
-                # Convert to string - could be Text or str
-                if isinstance(item, Text):
-                    line_str = str(item.plain) if isinstance(item.plain, str) else str(item)
-                elif isinstance(item, str):
-                    line_str = item
+        if isinstance(self.renderable, str):
+            # For strings, check if already has ANSI codes
+            has_ansi = '\033[' in self.renderable
+            
+            if has_ansi:
+                # Content has ANSI codes - respect explicit newlines
+                # Don't re-apply markup or re-wrap
+                content_lines = self.renderable.split('\n')
+            else:
+                # No ANSI codes, safe to process markup and wrap
+                processed = console._apply_markup(self.renderable) if console.markup else self.renderable
+                # Only wrap if no explicit newlines (respect user's line breaks)
+                if '\n' in processed:
+                    content_lines = processed.split('\n')
                 else:
-                    line_str = str(item)
-                
-                # CRITICAL: Handle embedded newlines from Text with no_wrap=True
-                # When Text.no_wrap=True, wrap() returns [self] and render() preserves
-                # all newlines in a single string. We must split them here.
-                if '\n' in line_str:
-                    content_lines.extend(line_str.split('\n'))
-                else:
-                    content_lines.append(line_str)
-        elif isinstance(self.renderable, str):
-            # For strings, split on newlines and process each
-            processed = console._apply_markup(self.renderable) if console.markup else self.renderable
-            # Split by newlines and filter out empty trailing lines
-            lines = processed.split('\n')
-            content_lines = [line for line in lines]  # Keep all lines including empty ones
+                    # Single line that might need wrapping
+                    import textwrap
+                    content_lines = textwrap.wrap(processed, width=content_width)
+        elif isinstance(self.renderable, Text):
+            # For Text objects, check for ANSI codes in plain content or no_wrap flag
+            plain_content = str(self.renderable.plain) if isinstance(self.renderable.plain, str) else str(self.renderable.plain)
+            has_ansi = '\033[' in plain_content
+            
+            if has_ansi or self.renderable.no_wrap:
+                # Respect explicit newlines - don't re-wrap
+                content_lines = plain_content.split('\n')
+            else:
+                # Normal Text wrapping behavior
+                try:
+                    wrapped = self.renderable.wrap(content_width)
+                    for line in wrapped:
+                        line_str = line.render(content_width)
+                        content_lines.append(line_str)
+                except Exception:
+                    content_lines = plain_content.split('\n')
         else:
-            # For other renderables
-            rendered = console.render(self.renderable, options.update_width(content_width))
-            for item in rendered:
-                if isinstance(item, Text):
-                    line_str = str(item.plain) if isinstance(item.plain, str) else str(item)
-                elif isinstance(item, str):
-                    line_str = item
-                else:
-                    line_str = str(item)
-                
-                # Handle embedded newlines
-                if '\n' in line_str:
-                    content_lines.extend(line_str.split('\n'))
-                else:
-                    content_lines.append(line_str)
+            # For other renderables, render to string lines
+            try:
+                rendered = console.render(self.renderable, options.update_width(content_width))
+                for item in rendered:
+                    if isinstance(item, Text):
+                        line_str = str(item.plain) if isinstance(item.plain, str) else str(item)
+                    elif isinstance(item, str):
+                        line_str = item
+                    else:
+                        line_str = str(item)
+                    
+                    # Handle embedded newlines
+                    if '\n' in line_str:
+                        content_lines.extend(line_str.split('\n'))
+                    else:
+                        content_lines.append(line_str)
+            except Exception:
+                content_lines = [str(self.renderable)]
         
         border_ansi = str(self.border_style) if self.border_style else ""
         style_ansi = str(self.style) if self.style else ""
@@ -172,13 +185,12 @@ class Panel:
             return wcswidth(plain)
         
         def pad_line(line: str, width: int) -> str:
+            # Calculate width from plain text, but preserve ANSI codes
             line_width = plain_width(line)
             if line_width < width:
+                # Add padding spaces - ANSI codes are preserved in line
                 return line + " " * (width - line_width)
-            elif line_width > width:
-                # Truncate if too long, being careful with ANSI codes
-                # Simple approach: truncate the raw string
-                return line[:width]
+            # If line is longer than target width, return as-is (don't truncate)
             return line
         
         # Build top border with title if present
@@ -248,7 +260,8 @@ class Panel:
             # Strip any trailing newlines or carriage returns
             line = line.rstrip('\n\r')
             
-            # Pad/truncate to content width (right padding to fill width)
+            # For lines with ANSI codes, don't add extra padding that might cause misalignment
+            # Just ensure the content fits within the panel
             padded_content = pad_line(line, content_width)
             
             # Apply left and right padding (pad_x on each side)
@@ -264,7 +277,7 @@ class Panel:
                 f"{styled_content}"
                 f"{border_ansi}{chars['vertical']}{reset}"
             )
-        
+            
         # Empty padding rows at bottom
         for _ in range(pad_y):
             fill = f"{style_ansi}{' ' * inner_width}{reset}" if self.style else " " * inner_width
@@ -389,3 +402,4 @@ class Columns:
     ) -> "Measurement":
         from ascii_colors.rich.console import Measurement
         return Measurement(10, options.max_width)
+
