@@ -116,23 +116,50 @@ class Panel:
         content_width = inner_width - (pad_x * 2)
         content_width = max(content_width, 1)
         
-        content_lines = []
+        # Render content to list of strings first to properly handle multi-line
+        content_lines: List[str] = []
+        
         if isinstance(self.renderable, Text):
-            wrapped = self.renderable.wrap(content_width)
-            for line in wrapped:
-                line_str = str(line.plain) if isinstance(line.plain, str) else str(line)
-                content_lines.append(line_str)
-        elif isinstance(self.renderable, str):
-            processed = console._apply_markup(self.renderable) if console.markup else self.renderable
-            for raw_line in processed.split("\n"):
-                text = Text(raw_line)
-                wrapped = text.wrap(content_width)
-                for wline in wrapped:
-                    line_str = str(wline.plain) if isinstance(wline.plain, str) else str(wline)
-                    content_lines.append(line_str)
-        else:
+            # For Text objects, render with the console to get lines
             rendered = console.render(self.renderable, options.update_width(content_width))
-            content_lines = rendered
+            for item in rendered:
+                # Convert to string - could be Text or str
+                if isinstance(item, Text):
+                    line_str = str(item.plain) if isinstance(item.plain, str) else str(item)
+                elif isinstance(item, str):
+                    line_str = item
+                else:
+                    line_str = str(item)
+                
+                # CRITICAL: Handle embedded newlines from Text with no_wrap=True
+                # When Text.no_wrap=True, wrap() returns [self] and render() preserves
+                # all newlines in a single string. We must split them here.
+                if '\n' in line_str:
+                    content_lines.extend(line_str.split('\n'))
+                else:
+                    content_lines.append(line_str)
+        elif isinstance(self.renderable, str):
+            # For strings, split on newlines and process each
+            processed = console._apply_markup(self.renderable) if console.markup else self.renderable
+            # Split by newlines and filter out empty trailing lines
+            lines = processed.split('\n')
+            content_lines = [line for line in lines]  # Keep all lines including empty ones
+        else:
+            # For other renderables
+            rendered = console.render(self.renderable, options.update_width(content_width))
+            for item in rendered:
+                if isinstance(item, Text):
+                    line_str = str(item.plain) if isinstance(item.plain, str) else str(item)
+                elif isinstance(item, str):
+                    line_str = item
+                else:
+                    line_str = str(item)
+                
+                # Handle embedded newlines
+                if '\n' in line_str:
+                    content_lines.extend(line_str.split('\n'))
+                else:
+                    content_lines.append(line_str)
         
         border_ansi = str(self.border_style) if self.border_style else ""
         style_ansi = str(self.style) if self.style else ""
@@ -149,22 +176,37 @@ class Panel:
             if line_width < width:
                 return line + " " * (width - line_width)
             elif line_width > width:
-                return line
+                # Truncate if too long, being careful with ANSI codes
+                # Simple approach: truncate the raw string
+                return line[:width]
             return line
         
+        # Build top border with title if present
         if self.title:
-            # Process title markup
-            title_processed = console._apply_markup(self.title) if console.markup else self.title
-            title_plain = ansi_escape.sub("", title_processed)
+            # Process title markup - but ensure we preserve border style context
+            title_clean = console._apply_markup(self.title) if console.markup else self.title
+            
+            # Remove trailing reset codes from title to prevent style leakage
+            # The title's internal resets are fine, but trailing reset affects border
+            title_clean = re.sub(r'\x1b\[0m$', '', title_clean)  # Remove trailing reset
+            title_clean = re.sub(r'\x1b\[0m(?=\s*$)', '', title_clean)  # Remove reset before trailing space
+            
+            title_plain = ansi_escape.sub("", title_clean)
             title_width = wcswidth(title_plain)
             
             available_for_lines = inner_width - title_width - 2
             
             if available_for_lines < 0:
                 max_title_len = inner_width - 4
-                title_plain = title_plain[:max_title_len]
-                title_width = wcswidth(title_plain)
-                title_processed = title_plain
+                # Truncate the plain text, then re-process
+                title_plain_truncated = title_plain[:max_title_len]
+                title_width = wcswidth(title_plain_truncated)
+                # Re-apply markup to truncated plain text if original had markup
+                if console.markup:
+                    # Try to preserve styling by using truncated plain with original style hint
+                    title_clean = title_plain_truncated
+                else:
+                    title_clean = title_plain_truncated
                 available_for_lines = inner_width - title_width - 2
             
             if self.title_align == "center":
@@ -180,13 +222,13 @@ class Panel:
             left_line_len = max(0, left_line_len)
             right_line_len = max(0, right_line_len)
             
-            top_border = (
-                f"{border_ansi}{chars['top_left']}"
-                f"{chars['horizontal'] * left_line_len} "
-                f"{title_processed}"
-                f" {chars['horizontal'] * right_line_len}"
-                f"{chars['top_right']}{reset}"
-            )
+            # Build top border with proper style handling
+            # Apply border style, then title (with its own styles), then re-apply border style
+            left_part = f"{border_ansi}{chars['top_left']}{chars['horizontal'] * left_line_len}{reset}"
+            title_part = f" {title_clean} "  # Title with its own internal styling
+            right_part = f"{border_ansi}{chars['horizontal'] * right_line_len}{chars['top_right']}{reset}"
+            
+            top_border = left_part + title_part + right_part
         else:
             top_border = (
                 f"{border_ansi}{chars['top_left']}"
@@ -196,29 +238,39 @@ class Panel:
         
         yield top_border
         
+        # Empty padding rows at top
         for _ in range(pad_y):
             fill = f"{style_ansi}{' ' * inner_width}{reset}" if self.style else " " * inner_width
             yield f"{border_ansi}{chars['vertical']}{reset}{fill}{border_ansi}{chars['vertical']}{reset}"
         
+        # Content rows with proper left padding - each line gets same padding
         for line in content_lines:
-            line = line.rstrip("\n\r")
+            # Strip any trailing newlines or carriage returns
+            line = line.rstrip('\n\r')
+            
+            # Pad/truncate to content width (right padding to fill width)
             padded_content = pad_line(line, content_width)
             
+            # Apply left and right padding (pad_x on each side)
             if self.style:
+                # Apply style to the padding area as well for consistency
                 styled_content = f"{style_ansi}{' ' * pad_x}{padded_content}{' ' * pad_x}{reset}"
             else:
                 styled_content = f"{' ' * pad_x}{padded_content}{' ' * pad_x}"
             
+            # Build full line: left border + padded content + right border
             yield (
                 f"{border_ansi}{chars['vertical']}{reset}"
                 f"{styled_content}"
                 f"{border_ansi}{chars['vertical']}{reset}"
             )
         
+        # Empty padding rows at bottom
         for _ in range(pad_y):
             fill = f"{style_ansi}{' ' * inner_width}{reset}" if self.style else " " * inner_width
             yield f"{border_ansi}{chars['vertical']}{reset}{fill}{border_ansi}{chars['vertical']}{reset}"
         
+        # Bottom border
         bottom_border = (
             f"{border_ansi}{chars['bottom_left']}"
             f"{chars['horizontal'] * inner_width}"

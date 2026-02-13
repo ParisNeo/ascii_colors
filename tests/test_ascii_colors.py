@@ -25,6 +25,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch, ANY
 from threading import Lock
 import threading # Needed for ProgressBar tests
+from typing import Optional
 
 # Ensure the module path is correct for testing
 try:
@@ -505,10 +506,10 @@ class TestASCIIColors(unittest.TestCase):
 
 class TestProgressBar(unittest.TestCase):
     def setUp(self):
-        # ProgressBar uses print() directly, not ASCIIColors.print
-        patcher_print = patch("builtins.print")
-        self.mock_print = patcher_print.start()
-        self.addCleanup(patcher_print.stop)
+        # ProgressBar writes directly to its file stream, not via print()
+        # Use a StringIO to capture output
+        self.capture_stream = io.StringIO()
+        self.addCleanup(self.capture_stream.close)
         
         patcher_time = patch("time.time")
         self.mock_time = patcher_time.start()
@@ -520,37 +521,49 @@ class TestProgressBar(unittest.TestCase):
         self.mock_tsize.return_value = os.terminal_size((80, 24))
         self.addCleanup(patcher_tsize.stop)
 
-    def _get_last_print_args(self):
-        if not self.mock_print.called: return None
-        # Get the last call's first positional argument
-        call = self.mock_print.call_args
-        if call and call[0]:
-            return call[0][0]
-        return None
+    def _get_stream_output(self) -> str:
+        """Get all output written to the capture stream."""
+        value = self.capture_stream.getvalue()
+        return value
+
+    def _get_last_line(self) -> Optional[str]:
+        """Get the last non-empty line from the capture stream."""
+        value = self.capture_stream.getvalue()
+        if not value:
+            return None
+        lines = [line for line in value.replace('\r', '\n').split('\n') if line.strip()]
+        return lines[-1] if lines else None
 
     def test_iterable_wrapper(self):
         """Test ProgressBar wrapping an iterable."""
         data = [1, 2, 3, 4, 5]
-        pbar = ProgressBar(data, desc="Iter Test", mininterval=0)
+        pbar = ProgressBar(data, desc="Iter Test", mininterval=0, file=self.capture_stream)
         list(pbar) # Consume iterator
         
-        # The progress bar prints multiple times - at least once per iteration plus init/final
-        self.assertGreater(self.mock_print.call_count, 0)
+        # The progress bar should have written output
+        output = self._get_stream_output()
+        self.assertGreater(len(output), 0)
+        self.assertIn("Iter Test", output)
+        self.assertIn("100%", output)
 
     def test_styling_options(self):
         """Test different styling parameters."""
-        with ProgressBar(total=10, desc="Style", progress_char=">", empty_char="-", bar_style="fill", mininterval=0) as pbar:
-            pbar.update(5)
+        pbar = ProgressBar(total=10, desc="Style", progress_char=">", empty_char="-", 
+                          bar_style="fill", mininterval=0, file=self.capture_stream)
+        pbar.update(5)
+        pbar.close()
 
-        render_text = self._get_last_print_args()
-        self.assertIsNotNone(render_text)
+        last_line = self._get_last_line()
+        self.assertIsNotNone(last_line)
         # Check that custom chars appear in output
-        self.assertIn(">", strip_ansi(render_text))
+        self.assertIn(">", strip_ansi(last_line))
 
     def test_thread_safety(self):
         total = 100
         num_threads = 4
-        pbar = ProgressBar(total=total, desc="Thread", mininterval=0.001)
+        # For thread safety test, we need a real stream that supports flush/close
+        # Use the capture stream but note: concurrent writes may interleave
+        pbar = ProgressBar(total=total, desc="Thread", mininterval=0.001, file=self.capture_stream)
         
         def worker():
             for _ in range(total // num_threads):
@@ -771,3 +784,4 @@ class TestQuestionaryCompat(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
