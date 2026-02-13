@@ -2,9 +2,7 @@
 Welcome to ascii_colors's Documentation! 🎨
 ############################################
 
-Welcome to ascii_colors! A Python library for rich terminal output with advanced logging features and interactive prompts.
-
-
+Welcome to ascii_colors! A Python library for rich terminal output with advanced logging features, interactive prompts, and Rich-compatible components.
 
 .. image:: https://img.shields.io/pypi/v/ascii_colors.svg
    :target: https://pypi.org/project/ascii-colors/
@@ -20,21 +18,35 @@ Welcome to ascii_colors! A Python library for rich terminal output with advanced
    :alt: PyPI Downloads
 
 
-Tired of bland terminal output? Need powerful logging without the boilerplate?
-**ASCIIColors** is your Python solution for vibrant terminal applications!
+Stop wrestling with multiple CLI libraries. **ASCIIColors** unifies everything you need for modern terminal applications into a single, elegant toolkit.
 
-It elegantly combines:
+| 🎨 **Colors & Styles** | 🪵 **Logging System** | 📊 **Progress Bars** |
+|:---|:---|:---|
+| 256-color support, bright variants, backgrounds, bold/italic/underline/blink | Full `logging` compatibility with handlers, formatters, JSON output, rotation | `tqdm`-like bars with custom styles (fill, blocks, line, emoji), thread-safe |
 
-*   ✨ **Effortless Color Printing:** Directly output text with a wide range of ANSI colors and styles using simple, intuitive methods.
-*   🪵 **Flexible Logging System:** A robust, leveled logging framework with handlers, formatters, and context management.
-*   🐍 **`logging` Compatibility:** Features a familiar API (`import ascii_colors as logging`) for seamless integration or transition from Python's standard logging module.
-*   🛠️ **Handy Utilities:** Includes useful tools like console spinners and text highlighting.
+| 🖥️ **Rich Components** | ❓ **Smart Prompts** | 🛠️ **Utilities** |
+|:---|:---|:---|
+| Panels, tables, trees, syntax highlighting, live displays, markdown | Drop-in `questionary` replacement: text, password, confirm, select, checkbox, autocomplete | Spinners, enhanced tracebacks, multicolor text, confirm/prompt helpers |
 
-Whether you're building CLI tools, backend services, or just want more informative script output, ASCIIColors makes your terminal interactions clearer and more expressive.
+---
 
-.. note::
-   For a quick overview and installation instructions, you can also check the
-   `README file on GitHub <https://github.com/ParisNeo/ascii_colors/blob/main/README.md>`_.
+Quick Start
+-----------
+
+.. code-block:: python
+
+   from ascii_colors import ASCIIColors, rich
+
+   # Rich markup anywhere
+   rich.print("[bold green]Success![/bold green] Operation [italic]completed[/italic]")
+
+   # Convenience methods
+   ASCIIColors.panel("Important message", title="Notice", border_style="yellow")
+
+   # Or use the standard logging API
+   import ascii_colors as logging
+   logging.basicConfig(level=logging.INFO)
+   logging.info("Application started")
 
 .. toctree::
    :maxdepth: 2
@@ -42,14 +54,18 @@ Whether you're building CLI tools, backend services, or just want more informati
 
    installation
    quickstart
-   usage
+   basic_usage
+   logging_guide
+   rich_integration
+   interactive_prompts
    api
 
 Features
 --------
 
-- **Rich Colors & Styles**: 256-color support with bright variants, backgrounds, and text styles (bold, italic, underline, etc.)
+- **Rich Colors & Styles**: 256-color support with bright variants, backgrounds, and text styles
 - **Dual API**: Native fluent API + standard logging compatibility
+- **Rich Integration**: Full Rich-compatible components (panels, tables, trees, syntax, markdown, live displays)
 - **Advanced Formatting**: Percent-style, brace-style, and JSON formatters
 - **Contextual Logging**: Thread-local context fields automatically included in all logs
 - **Progress Bars**: Customizable progress bars with multiple styles
@@ -57,30 +73,6 @@ Features
 - **Questionary Compatibility**: Drop-in replacement for the popular `questionary` library
 - **Enhanced Tracebacks**: Beautiful exception formatting with local variable inspection
 - **Cross-Platform**: Works on Windows, Linux, and macOS
-
-Quick Example
--------------
-
-.. code-block:: python
-
-   from ascii_colors import ASCIIColors, getLogger, basicConfig, LogLevel
-   import logging
-
-   # Direct colored output
-   ASCIIColors.green("✓ Success!", style=ASCIIColors.style_bold)
-   ASCIIColors.multicolor(["Error: ", "File not found"], 
-                          [ASCIIColors.color_red, ASCIIColors.color_white])
-
-   # Standard logging compatibility
-   basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
-   logger = getLogger("myapp")
-   logger.info("Application started")
-
-   # Interactive prompts (questionary-compatible)
-   from ascii_colors import questionary
-
-   name = questionary.text("What's your name?").ask()
-   proceed = questionary.confirm("Continue?", default=True).ask()
 
 Indices and tables
 ==================

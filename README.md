@@ -6,17 +6,17 @@
 [![PyPI downloads](https://img.shields.io/pypi/dm/ascii_colors.svg)](https://pypi.org/project/ascii-colors/)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
-> **One library. Colors. Logging. Progress. Menus. Prompts. Done.**
+> **One library. Colors. Logging. Progress. Menus. Prompts. Panels. Tables. Done.**
 
-Stop wrestling with multiple CLI libraries. **ASCIIColors** unifies everything you need for modern terminal applications into a single, elegant toolkit — from quick colored output to production-grade logging, interactive menus, and smart prompts.
+Stop wrestling with multiple CLI libraries. **ASCIIColors** unifies everything you need for modern terminal applications into a single, elegant toolkit — from quick colored output to production-grade logging, interactive menus, smart prompts, and rich UI components.
 
 | 🎨 **Colors & Styles** | 🪵 **Logging System** | 📊 **Progress Bars** |
 |:---|:---|:---|
 | 256-color support, bright variants, backgrounds, bold/italic/underline/blink | Full `logging` compatibility with handlers, formatters, JSON output, rotation | `tqdm`-like bars with custom styles (fill, blocks, line, emoji), thread-safe |
 
-| 🖱️ **Interactive Menus** | ❓ **Smart Prompts** | 🛠️ **Utilities** |
+| 🖥️ **Rich Components** | ❓ **Smart Prompts** | 🛠️ **Utilities** |
 |:---|:---|:---|
-| Arrow-key navigation, submenus, filtering, multi-select, checkbox mode | Drop-in `questionary` replacement: text, password, confirm, select, checkbox, autocomplete | Spinners, syntax highlighting, enhanced tracebacks with locals, multicolor text, confirm/prompt helpers |
+| Panels, tables, trees, syntax highlighting, live displays, markdown | Drop-in `questionary` replacement: text, password, confirm, select, checkbox, autocomplete | Spinners, syntax highlighting, enhanced tracebacks with locals, multicolor text, confirm/prompt helpers |
 
 ---
 
@@ -44,14 +44,15 @@ pip install ascii_colors[dev]
 
 ### Choose Your API
 
-ASCIIColors offers **two complementary approaches** that work seamlessly together:
+ASCIIColors offers **three complementary approaches** that work seamlessly together:
 
-| Approach | Best For | API Style | Key Methods |
-|:---|:---|:---|:---|
-| **Direct Print** | Immediate visual feedback, status messages, user interaction, spinners | `ASCIIColors.green("text")` | `print()`, `red()`, `green()`, `multicolor()`, `highlight()` |
-| **Logging System** | Structured application logs, filtering, multiple outputs, production monitoring | `import ascii_colors as logging` | `basicConfig()`, `getLogger()`, `add_handler()` |
+| Approach | Best For | API Style |
+|:---|:---|:---|
+| **Direct Print** | Immediate visual feedback, status messages, user interaction | `ASCIIColors.green("text")` |
+| **Logging System** | Structured application logs, filtering, multiple outputs | `import ascii_colors as logging` |
+| **Rich Components** | Beautiful UI: panels, tables, trees, syntax highlighting | `ASCIIColors.panel()` or `rich.print()` |
 
-### Direct Print — Instant Visual Feedback
+### 1. Direct Print — Instant Visual Feedback
 
 Perfect for CLI tools, status messages, and user-facing output:
 
@@ -64,52 +65,19 @@ ASCIIColors.green("✓ Success!")
 ASCIIColors.yellow("Warning: Low memory", style=ASCIIColors.style_bold)
 ASCIIColors.blue("Info: Processing item 42")
 
-# Full control with .print() — combine colors, backgrounds, styles
+# Full control with .print()
 ASCIIColors.print(
-    " CRITICAL SYSTEM FAILURE ",
+    " CRITICAL ALERT ",
     color=ASCIIColors.color_black,
     background=ASCIIColors.color_bg_red,
     style=ASCIIColors.style_bold + ASCIIColors.style_blink
 )
 
-# Multicolor text — inline color changes without multiple print calls
-ASCIIColors.multicolor(
-    ["Status: ", "ACTIVE", " | Load: ", "85%", " | Memory: ", "OK"],
-    [
-        ASCIIColors.color_white,
-        ASCIIColors.color_green,
-        ASCIIColors.color_white,
-        ASCIIColors.color_yellow,
-        ASCIIColors.color_white,
-        ASCIIColors.color_green
-    ]
-)
-
-# Highlight patterns in text — great for log filtering
-ASCIIColors.highlight(
-    "ERROR: File not found in /path/to/file at line 42",
-    subtext=["ERROR", "not found"],
-    highlight_color=ASCIIColors.color_bright_red,
-    color=ASCIIColors.color_white  # Non-matching text color
-)
-
-# Highlight entire lines containing pattern
-log_output = """\
-INFO: Server starting...
-ERROR: Database connection failed
-INFO: Retrying connection...
-ERROR: Max retries exceeded
-INFO: Shutting down...
-"""
-ASCIIColors.highlight(
-    log_output,
-    subtext="ERROR",
-    whole_line=True,
-    highlight_color=ASCIIColors.color_bg_bright_red + ASCIIColors.color_white
-)
+# Rich markup for inline styling
+ASCIIColors.rich_print("[bold red]Error:[/bold red] [yellow]Something went wrong[/yellow]")
 ```
 
-### Logging System — Production-Grade Structured Logging
+### 2. Logging System — Production-Grade Structured Logging
 
 Full compatibility with Python's standard `logging` module:
 
@@ -126,40 +94,55 @@ logging.basicConfig(
 )
 
 # Add multiple outputs with different formats
-# JSON file for log aggregation
 json_handler = logging.FileHandler("app.jsonl", mode='a')
 json_handler.setFormatter(logging.JSONFormatter(
     include_fields=["timestamp", "levelname", "name", "message", "pathname", "lineno"]
 ))
-json_handler.setLevel(logging.WARNING)  # Only WARNING and above
+json_handler.setLevel(logging.WARNING)
 logging.getLogger().addHandler(json_handler)
-
-# Rotating file handler for long-running applications
-rotate_handler = logging.handlers.RotatingFileHandler(
-    "debug.log",
-    maxBytes=10*1024*1024,  # 10 MB per file
-    backupCount=5
-)
-rotate_handler.setFormatter(logging.Formatter(
-    "%(asctime)s | %(levelname)-8s | %(name)s:%(funcName)s:%(lineno)d | %(message)s"
-))
-rotate_handler.setLevel(logging.DEBUG)  # All debug info
-logging.getLogger().addHandler(rotate_handler)
 
 # Use throughout your application
 logger = logging.getLogger("MyService")
+logger.info("Service started on port %d", 8080)
+logger.warning("Disk usage at %d%%", 85)
+logger.error("Failed to connect to database")
+```
 
-logger.debug("Connection pool initialized with %d connections", 10)  # To debug.log only
-logger.info("Service started on port %d", 8080)  # To console and debug.log
-logger.warning("Disk usage at %d%%", 85)  # To all handlers
-logger.error("Failed to connect to database")  # To all handlers
-logger.critical("System out of memory!")  # To all handlers
+### 3. Rich Components — Beautiful Terminal UI
 
-# Exception logging with full tracebacks
-try:
-    risky_operation()
-except Exception as e:
-    logger.exception("Operation failed: %s", e)  # Automatically includes exc_info
+Create stunning terminal interfaces with panels, tables, trees, and more:
+
+```python
+from ascii_colors import ASCIIColors, rich
+
+# Panels for highlighting content
+ASCIIColors.panel("Deployment successful!", title="✓ Success", border_style="green")
+
+# Tables for structured data
+ASCIIColors.table(
+    "Service", "Status", "Latency",
+    rows=[
+        ["API Gateway", "[green]● Healthy[/green]", "12ms"],
+        ["Database", "[yellow]● Degraded[/yellow]", "120ms"]
+    ],
+    title="System Health"
+)
+
+# Trees for hierarchical data
+root = ASCIIColors.tree("📁 project")
+root.add("📁 src").add("📄 main.py")
+root.add("📁 tests")
+rich.print(root)
+
+# Syntax highlighting for code
+code = "def hello(): print('world')"
+ASCIIColors.syntax(code, language="python", line_numbers=True)
+
+# Live displays for progress
+with ASCIIColors.live("Starting...") as live:
+    for i in range(10):
+        live.update(f"Progress: {i+1}/10")
+        time.sleep(0.5)
 ```
 
 ---
@@ -194,82 +177,372 @@ ASCIIColors.reverse("Reversed video")
 ASCIIColors.hidden("Hidden text (password mask)")
 ASCIIColors.strikethrough("Strikethrough text")
 
-# Combining styles and colors
-ASCIIColors.print(
-    "Important!",
-    color=ASCIIColors.color_yellow,
-    style=ASCIIColors.style_bold + ASCIIColors.style_underline
-)
-
-# Bright colors (high intensity)
-ASCIIColors.print("Bright red", color=ASCIIColors.color_bright_red)
-ASCIIColors.print("Bright green", color=ASCIIColors.color_bright_green)
-ASCIIColors.print("Bright blue", color=ASCIIColors.color_bright_blue)
-# ... and all other bright variants
-
-# Background colors
-ASCIIColors.print("Red background", background=ASCIIColors.color_bg_red)
-ASCIIColors.print("Bright yellow background", background=ASCIIColors.color_bg_bright_yellow)
-
 # Full control with .print()
 ASCIIColors.print(
     "Complex styling",
     color=ASCIIColors.color_cyan,
     background=ASCIIColors.color_bg_black,
-    style=ASCIIColors.style_bold + ASCIIColors.style_italic,
-    end="\n\n",  # Custom line ending
-    flush=True,   # Force immediate output
-    file=sys.stderr  # Output stream
+    style=ASCIIColors.style_bold + ASCIIColors.style_italic
 )
 ```
 
-#### Advanced Printing Features
+#### Rich Markup Syntax
+
+Use Rich-style markup for inline styling anywhere:
 
 ```python
-# Compose effects by nesting (emit=False returns string without printing)
-styled = ASCIIColors.green("Success: ", emit=False, end="")
-styled += ASCIIColors.bold("Operation completed", emit=False)
-print(styled)  # Print composed string
+from ascii_colors import rich, ASCIIColors
 
-# Multiline colored blocks
-ASCIIColors.print("""\
-Line 1
-Line 2
-Line 3""", color=ASCIIColors.color_blue)
+# Basic colors
+rich.print("[red]Error[/red] [green]Success[/green] [blue]Info[/blue]")
+rich.print("[yellow]Warning[/yellow] [magenta]Accent[/magenta] [cyan]Highlight[/cyan]")
 
-# Conditional coloring based on status
-def print_status(message, is_error=False):
-    color = ASCIIColors.color_red if is_error else ASCIIColors.color_green
-    prefix = "✗" if is_error else "✓"
-    ASCIIColors.print(f"{prefix} {message}", color=color, style=ASCIIColors.style_bold)
+# Styles
+rich.print("[bold]Bold[/bold] [italic]Italic[/italic] [underline]Underlined[/underline]")
+rich.print("[dim]Dimmed[/dim] [blink]Blink[/blink]")
 
-print_status("File saved")           # Green
-print_status("Permission denied", True)  # Red
+# Bright colors
+rich.print("[bright_red]Bright red[/bright_red] [bright_green]Bright green[/bright_green]")
+
+# Backgrounds
+rich.print("[on red]White on red[/on red]")
+rich.print("[bold white on blue]Bold white on blue[/bold white on blue]")
+
+# Semantic tags
+rich.print("[success]Operation completed[/success]")
+rich.print("[error]An error occurred[/error]")
+rich.print("[warning]Warning message[/warning]")
+rich.print("[info]Information[/info]")
+rich.print("[danger]Critical issue[/danger]")
+
+# Method alias on ASCIIColors
+ASCIIColors.rich_print("[bold green]Hello World[/bold green]")
 ```
 
-### 📊 Progress Bars
+---
 
-Customizable, thread-safe progress bars for any iterable or manual updates:
+### 🖥️ Rich Components (UI Elements)
+
+ASCIIColors includes a complete **Rich-compatible** rendering layer — no external dependencies needed!
+
+#### Panels
+
+```python
+from ascii_colors import ASCIIColors, rich
+
+# Simple panel
+ASCIIColors.panel("Hello, World!", title="Greeting")
+
+# Styled panel with markup
+ASCIIColors.panel(
+    "[bold red]This is a warning message with important information.[/bold red]",
+    title="[bold yellow]⚠ Warning[/bold yellow]",
+    border_style="bold yellow",
+    box="round",           # "square", "round", "double", "minimal"
+    padding=(1, 2)         # (vertical, horizontal)
+)
+
+# Using rich module for more control
+from ascii_colors.rich import Panel, BoxStyle
+
+panel = Panel(
+    "Content with [bold]markup[/bold] support",
+    title="[bold]Title[/bold]",
+    border_style="bold cyan",
+    box=BoxStyle.ROUND,
+    padding=(2, 4),
+    width=60
+)
+rich.print(panel)
+```
+
+#### Tables
+
+```python
+from ascii_colors import ASCIIColors, rich
+
+# Simple table
+ASCIIColors.table(
+    "Name", "Role", "Status",
+    rows=[
+        ["Alice", "Admin", "[green]Active[/green]"],
+        ["Bob", "User", "[green]Active[/green]"],
+        ["Carol", "Guest", "[yellow]Pending[/yellow]"]
+    ]
+)
+
+# With title and styling
+ASCIIColors.table(
+    "Package", "Version", "Status",
+    rows=[
+        ["numpy", "1.24.0", "[green]✓ up to date[/green]"],
+        ["pandas", "2.0.0", "[yellow]⚠ update available[/yellow]"],
+        ["requests", "2.28.0", "[red]✗ security fix needed[/red]"]
+    ],
+    title="[bold]Installed Packages[/bold]",
+    header_style="bold cyan",
+    show_lines=True,
+    box="round"
+)
+```
+
+#### Trees
+
+```python
+from ascii_colors import ASCIIColors, rich
+
+# Build a file tree
+root = ASCIIColors.tree("📁 project", style="bold")
+src = root.add_node("📁 src")
+src.add("📄 __init__.py")
+src.add("📄 main.py")
+utils = src.add_node("📁 utils")
+utils.add("📄 helpers.py")
+
+tests = root.add_node("📁 tests")
+tests.add("📄 test_main.py")
+
+root.add("📄 README.md")
+root.add("📄 pyproject.toml")
+
+rich.print(root)
+```
+
+#### Syntax Highlighting
+
+```python
+from ascii_colors import ASCIIColors
+
+# Python code
+python_code = '''
+def fibonacci(n):
+    """Generate Fibonacci sequence."""
+    a, b = 0, 1
+    for _ in range(n):
+        yield a
+        a, b = b, a + b
+'''
+ASCIIColors.syntax(python_code, language="python", line_numbers=True)
+
+# JSON
+json_code = '''{
+    "name": "ascii_colors",
+    "version": "1.0.0",
+    "features": ["colors", "logging", "progress", "panels"]
+}'''
+ASCIIColors.syntax(json_code, language="json")
+
+# Other languages: javascript, bash, yaml, sql, text
+```
+
+#### Markdown Rendering
+
+```python
+from ascii_colors import ASCIIColors
+
+markdown_text = """# ASCII Colors
+
+A **powerful** library for terminal output.
+
+## Features
+
+- *Colors* and styles
+- **Bold** and __underlined__ text
+- `inline code` support
+
+> This is a blockquote with important information.
+
+| Feature | Status |
+|---------|--------|
+| Panels | ✓ |
+| Tables | ✓ |
+| Trees | ✓ |
+"""
+
+ASCIIColors.markdown(markdown_text)
+```
+
+#### Columns Layout
+
+```python
+from ascii_colors import ASCIIColors
+
+items = [
+    "Feature 1: Colors",
+    "Feature 2: Styles", 
+    "Feature 3: Panels",
+    "Feature 4: Tables",
+    "Feature 5: Trees",
+    "Feature 6: Syntax"
+]
+
+ASCIIColors.columns(*items, equal=True, width=30)
+```
+
+#### Rules (Dividers)
+
+```python
+from ascii_colors import ASCIIColors, rich
+
+# Simple rule
+ASCIIColors.rule()
+
+# With title
+ASCIIColors.rule("Section Title", style="cyan")
+
+# Alignment options
+ASCIIColors.rule("Centered", style="bold magenta")     # default
+ASCIIColors.rule("Left", align="left", style="yellow")
+ASCIIColors.rule("Right", align="right", style="green")
+
+# Custom characters
+ASCIIColors.rule("Double", characters="═", style="blue")
+```
+
+#### Live Displays
+
+```python
+from ascii_colors import ASCIIColors, rich
+from ascii_colors.rich import Text
+import time
+
+# Progress with live update
+with ASCIIColors.live("Starting...", refresh_per_second=4) as live:
+    for i in range(10):
+        time.sleep(0.5)
+        bar = "█" * (i + 1) + "░" * (9 - i)
+        live.update(Text(f"Progress: [{bar}] {i+1}/10"))
+    
+    time.sleep(0.3)
+    live.update(Text("[bold green]✓ Complete![/bold green]"))
+```
+
+#### Status Spinners
+
+```python
+from ascii_colors import ASCIIColors
+import time
+
+# Default dots spinner
+with ASCIIColors.status("Loading data...") as status:
+    time.sleep(3)
+
+# Different spinner styles
+spinners = ["dots", "line", "arrow", "pulse", "star", "moon"]
+for spinner in spinners:
+    with ASCIIColors.status(
+        f"Testing {spinner}...",
+        spinner=spinner,
+        spinner_style="cyan"
+    ) as status:
+        time.sleep(2)
+
+# With status updates
+with ASCIIColors.status("Connecting...") as status:
+    time.sleep(1)
+    status.update("Authenticating...")
+    time.sleep(1)
+    status.update("Fetching data...")
+```
+
+---
+
+### 🪵 Logging System
+
+#### Basic Configuration
+
+```python
+import sys
+import ascii_colors as logging
+
+# Quick start
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)-8s] %(name)s: %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+
+# With multiple outputs
+logger = logging.getLogger("MyApp")
+
+# Console: colorful output
+console = logging.ConsoleHandler(stream=sys.stdout, level=logging.INFO)
+console.setFormatter(logging.Formatter(
+    "{level_name:>8} | {message}",
+    style='{'
+))
+
+# File: detailed logs
+file_handler = logging.FileHandler("debug.log", level=logging.DEBUG)
+file_handler.setFormatter(logging.Formatter(
+    "%(asctime)s | %(levelname)-8s | %(name)s:%(funcName)s:%(lineno)d | %(message)s",
+    include_source=True
+))
+
+# JSON: structured for aggregation
+json_handler = logging.FileHandler("events.jsonl", level=logging.WARNING)
+json_handler.setFormatter(logging.JSONFormatter(
+    include_fields=["timestamp", "levelname", "name", "message", "pathname", "lineno"]
+))
+
+logging.getLogger().addHandler(console)
+logging.getLogger().addHandler(file_handler)
+logging.getLogger().addHandler(json_handler)
+
+# Usage
+logger.debug("Debug info")      # To file only
+logger.info("Service started")  # To console and file
+logger.warning("Disk full")     # To all handlers
+logger.error("Database error")  # To all handlers
+```
+
+#### Contextual Logging
+
+```python
+from ascii_colors import ASCIIColors, logging
+
+# Persistent context (all subsequent logs)
+ASCIIColors.set_context(
+    app_name="MyService",
+    app_version="1.2.3",
+    environment="production"
+)
+
+# Temporary context (auto-cleanup)
+with ASCIIColors.context(
+    request_id="req-abc-123",
+    user_id="user-456"
+):
+    logger.info("Processing request")  # Includes context
+    # ... do work ...
+    logger.info("Done")  # Includes context
+
+# After block: context automatically removed
+logger.info("Cleanup")  # Without request context
+```
+
+---
+
+### 📊 Progress Bars
 
 ```python
 from ascii_colors import ProgressBar, ASCIIColors
 import time
 
-# Basic usage — wrap any iterable
+# Basic usage
 for item in ProgressBar(range(100), desc="Processing"):
-    time.sleep(0.01)  # Your work here
+    time.sleep(0.01)
 
 # Custom styling
 for item in ProgressBar(
     range(1000),
     desc="Uploading",
-    unit="files",
     color=ASCIIColors.color_cyan,
-    bar_style="fill",      # "fill" (default), "line", "blocks", "emoji"
+    bar_style="fill",      # "fill", "line", "blocks", "emoji"
     progress_char="█",
     empty_char="░"
 ):
-    process_file(item)
+    process(item)
 
 # Emoji style
 for item in ProgressBar(
@@ -281,697 +554,183 @@ for item in ProgressBar(
 ):
     build_step()
 
-# Manual control with context manager
-with ProgressBar(
-    total=1024 * 1024,  # Total bytes to upload
-    desc="Uploading",
-    unit="B",
-    unit_scale=True,    # Auto-convert to KB, MB, etc.
-    unit_divisor=1024
-) as pbar:
+# Manual control
+with ProgressBar(total=1024*1024, desc="Uploading", unit="B") as pbar:
     while chunk := read_chunk():
         pbar.update(len(chunk))
-        # Progress bar updates automatically
-
-# Manual control without context manager
-pbar = ProgressBar(total=100, desc="Custom")
-pbar.update(10)   # Update by 10
-pbar.update(20)   # Update by 20 (now at 30)
-pbar.n = 50       # Set absolute position
-pbar.refresh()    # Force redraw
-pbar.close()      # Clean up (or use context manager)
-
-# Thread-safe updates from multiple threads
-import threading
-
-pbar = ProgressBar(total=100, desc="Parallel")
-
-def worker():
-    for _ in range(25):
-        pbar.update(1)
-        time.sleep(0.01)
-
-threads = [threading.Thread(target=worker) for _ in range(4)]
-for t in threads: t.start()
-for t in threads: t.join()
-pbar.close()
-
-# Custom bar format
-custom_format = "{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}{postfix}]"
-for item in ProgressBar(
-    range(100),
-    desc="Custom",
-    bar_format=custom_format
-):
-    time.sleep(0.01)
 ```
 
-### 🖱️ Interactive Menus
+---
 
-Keyboard-navigable menus with multiple modes:
+### 🖱️ Interactive Menus
 
 ```python
 from ascii_colors import Menu, ASCIIColors
 
-# ============================================
-# MODE 1: Return Mode — Select and return value
-# ============================================
-
-menu = Menu("Choose export format", mode='return')
+# Return mode — select and return value
+menu = Menu("Choose format", mode='return')
 menu.add_choice("JSON", value="json")
 menu.add_choice("YAML", value="yaml")
 menu.add_choice("XML", value="xml")
-menu.add_choice("CSV", value="csv")
 
-format_choice = menu.run()  # Returns "json", "yaml", "xml", or "csv"
-print(f"Selected: {format_choice}")
+format_choice = menu.run()  # Returns "json", "yaml", or "xml"
 
-# With filtering (type to filter choices)
+# Execute mode — run actions
+def show_status():
+    ASCIIColors.green("All systems operational")
+
+menu = Menu("System Manager", mode='execute')
+menu.add_action("Show Status", show_status)
+menu.add_action("Restart", restart_service)
+menu.run()
+
+# Checkbox mode — multi-select
+menu = Menu("Select features", mode='checkbox')
+menu.add_checkbox("Auth", value="auth", checked=True)
+menu.add_checkbox("Cache", value="cache")
+selected = menu.run()  # Returns list like ["auth"]
+
+# With filtering
 menu = Menu("Select user", mode='return', enable_filtering=True)
 menu.add_choices([
     ("Alice Anderson", "alice"),
     ("Bob Baker", "bob"),
     ("Charlie Chen", "charlie"),
-    ("Diana Davis", "diana"),
 ])
-user = menu.run()  # Type "al" to filter to "Alice Anderson"
-
-# ============================================
-# MODE 2: Execute Mode — Run actions
-# ============================================
-
-def show_status():
-    ASCIIColors.green("All systems operational")
-
-def restart_service():
-    ASCIIColors.yellow("Restarting...")
-    # Restart logic here
-    ASCIIColors.green("Restarted!")
-
-def quit_app():
-    ASCIIColors.cyan("Goodbye!")
-    exit(0)
-
-main_menu = Menu("System Manager", mode='execute')
-main_menu.add_action("Show Status", show_status)
-main_menu.add_action("Restart Service", restart_service)
-main_menu.add_action("Quit", quit_app)
-
-main_menu.run()  # Menu loops until quit action selected
-
-# ============================================
-# MODE 3: Checkbox Mode — Multi-select
-# ============================================
-
-features_menu = Menu("Select features to install", mode='checkbox')
-features_menu.add_checkbox("Authentication", value="auth", checked=True)
-features_menu.add_checkbox("Logging", value="logging", checked=True)
-features_menu.add_checkbox("Caching", value="cache", checked=False)
-features_menu.add_checkbox("WebSocket", value="websocket", checked=False)
-features_menu.add_checkbox("GraphQL API", value="graphql", checked=False)
-
-selected = features_menu.run()  # Space to toggle, Enter to confirm
-print(f"Installing: {selected}")  # e.g., ['auth', 'logging', 'cache']
-
-# ============================================
-# Advanced: Submenus and custom styling
-# ============================================
-
-# Create submenu
-settings_menu = Menu("Settings", mode='execute')
-settings_menu.add_action("General", lambda: print("General settings"))
-settings_menu.add_action("Network", lambda: print("Network settings"))
-
-# Create main menu with custom styling
-main = Menu(
-    "Application Menu",
-    mode='execute',
-    clear_screen_on_run=True,      # Clear screen before showing
-    pointer="▶",                    # Custom pointer
-    selected_icon="●",              # Custom selected indicator
-    unselected_icon="○"
-)
-
-main.add_action("Start", lambda: print("Starting..."))
-main.add_submenu("Settings", settings_menu)  # ↗ Enter submenu
-main.add_input("Username", initial_value="admin")  # Text input field
-main.add_action("Exit", lambda: exit(0))
-
-main.run()
 ```
+
+---
 
 ### ❓ Smart Prompts (Questionary-Compatible)
 
 Complete drop-in replacement for the `questionary` library:
 
 ```python
-from ascii_colors import questionary  # Module-like object
-# Or import directly:
-# from ascii_colors import text, password, confirm, select, checkbox, autocomplete, form
+from ascii_colors import questionary
 
-# ============================================
-# Text Input
-# ============================================
+# Text input
+name = questionary.text("What's your name?", default="Anonymous").ask()
 
-# Basic text
-name = questionary.text("What's your name?").ask()
-
-# With default value
-name = questionary.text(
-    "What's your name?",
-    default="Anonymous"
-).ask()
-
-# Multiline text
-description = questionary.text(
-    "Enter description",
-    multiline=True
-).ask()
-
-# With validation
-def validate_email(text):
-    return "@" in text and "." in text.split("@")[1]
-
-email = questionary.text(
-    "Enter email",
-    validate=validate_email
-).ask()
-
-# Using Validator class
-from ascii_colors.questionary import Validator, ValidationError
-
-class NonEmptyValidator(Validator):
-    def validate(self, document):
-        if not document.strip():
-            raise ValidationError("Please enter a value")
-
-value = questionary.text("Required field", validate=NonEmptyValidator()).ask()
-
-# ============================================
-# Password Input
-# ============================================
-
-# Basic password (hidden input)
-password = questionary.password("Enter password").ask()
-
-# With confirmation (enter twice)
+# Password (hidden, with confirmation)
 password = questionary.password(
     "Set password",
-    confirm=True,
-    confirm_message="Confirm password"
+    confirm=True
 ).ask()
 
-# ============================================
-# Confirmation (Yes/No)
-# ============================================
+# Yes/No confirmation
+if questionary.confirm("Continue?", default=True).ask():
+    proceed()
 
-if questionary.confirm("Do you want to continue?").ask():
-    print("Continuing...")
-
-# With default
-proceed = questionary.confirm("Proceed?", default=True).ask()
-
-# ============================================
-# Single Select
-# ============================================
-
-# Simple list
+# Single selection
 color = questionary.select(
     "Favorite color?",
-    choices=["Red", "Green", "Blue", "Yellow"]
+    choices=["Red", "Green", "Blue"]
 ).ask()
 
-# With dictionary choices (name shown, value returned)
+# With display names and values
 format_choice = questionary.select(
     "Export format",
     choices=[
         {"name": "JSON (recommended)", "value": "json"},
-        {"name": "YAML", "value": "yaml"},
-        {"name": "XML (legacy)", "value": "xml", "disabled": True}
-    ],
-    default="json"
-).ask()  # Returns "json", "yaml", or "xml"
+        {"name": "YAML", "value": "yaml", "disabled": True},
+        {"name": "CSV", "value": "csv"}
+    ]
+).ask()  # Returns "json", "yaml", or "csv"
 
-# ============================================
-# Multi-Select (Checkbox)
-# ============================================
-
+# Multi-selection (checkbox)
 features = questionary.checkbox(
     "Select features",
-    choices=["Auth", "Logging", "Cache", "WebSocket"],
-    default=["Auth", "Logging"]  # Pre-selected
-).ask()  # Returns list like ["Auth", "Cache"]
-
-# With custom styling
-features = questionary.checkbox(
-    "Select toppings",
     choices=[
-        {"name": "Cheese", "value": "cheese", "checked": True},
-        {"name": "Pepperoni", "value": "pepperoni"},
-        {"name": "Mushrooms", "value": "mushrooms"},
-        {"name": "Anchovies", "value": "anchovies", "disabled": True}
+        {"name": "Authentication", "value": "auth", "checked": True},
+        {"name": "Logging", "value": "logging"},
+        {"name": "Caching", "value": "cache"}
     ]
-).ask()
+).ask()  # Returns list of selected values
 
-# Minimum selection requirement
-required = questionary.checkbox(
-    "Select at least one",
-    choices=["A", "B", "C"],
-    min_selected=1
-).ask()
-
-# ============================================
 # Autocomplete
-# ============================================
-
 city = questionary.autocomplete(
     "Enter city",
-    choices=[
-        "New York", "Los Angeles", "Chicago", "Houston", "Boston",
-        "Seattle", "Denver", "Atlanta", "Miami", "San Francisco"
-    ],
-    ignore_case=True,      # Case-insensitive matching
-    match_middle=True,     # Match "geles" to "Los Angeles"
-    max_suggestions=5      # Show max 5 suggestions
+    choices=["New York", "London", "Tokyo", "Paris"],
+    ignore_case=True,
+    match_middle=True
 ).ask()
 
-# ============================================
-# Forms — Sequential Questions
-# ============================================
-
-user_info = questionary.form(
+# Forms (multiple questions)
+answers = questionary.form(
     questionary.text("First name"),
     questionary.text("Last name"),
-    questionary.password("Password", confirm=True),
-    questionary.confirm("Subscribe to newsletter?", default=False)
+    questionary.confirm("Subscribe?", default=False)
 ).ask()
-# Returns: {
-#     "First name": "...",
-#     "Last name": "...",
-#     "Password": "...",
-#     "Subscribe to newsletter?": True/False
-# }
+# Returns: {"First name": "...", "Last name": "...", "Subscribe?": True/False}
 
-# Conditional skipping
-is_company = questionary.confirm("Is this a company account?").ask()
+# Validation
+from ascii_colors.questionary import Validator, ValidationError
 
-company_name = questionary.text(
-    "Company name:"
-).skip_if(not is_company, default="N/A").ask()
+class EmailValidator(Validator):
+    def validate(self, document):
+        if "@" not in document:
+            raise ValidationError("Email must contain @")
 
-# ============================================
-# Direct API Alternative
-# ============================================
+email = questionary.text("Email:", validate=EmailValidator()).ask()
 
-from ascii_colors.questionary import text, password, confirm, select, checkbox
-
-# Same usage, slightly different import
-name = text("Name?").ask()
-proceed = confirm("Continue?").ask()
-```
-
-### 🛠️ Utility Functions
-
-```python
-from ascii_colors import ASCIIColors, execute_with_animation, confirm, prompt
-
-# ============================================
-# Execute with Animation (Spinner)
-# ============================================
-
-def long_running_task():
-    import time
-    time.sleep(3)
-    return "Result data"
-
-# Shows spinner while function runs
-result = ASCIIColors.execute_with_animation(
-    "Processing large dataset...",
-    long_running_task,
-    color=ASCIIColors.color_yellow  # Spinner color
-)
-# On success: ✓ appears, result returned
-# On failure: ✗ appears, exception re-raised
-
-# With custom success/failure messages
-result = ASCIIColors.execute_with_animation(
-    "Uploading file",
-    upload_function,
-    color=ASCIIColors.color_cyan
-)
-
-# ============================================
-# Confirmation Prompt
-# ============================================
-
-# Simple yes/no
-if ASCIIColors.confirm("Delete this file?"):
-    delete_file()
-
-# With default (yes/no)
-if ASCIIColors.confirm("Overwrite existing?", default_yes=False):
-    overwrite()
-
-# Custom colors
-if ASCIIColors.confirm(
-    "Continue with dangerous operation?",
-    default_yes=False,
-    prompt_color=ASCIIColors.color_bright_red
-):
-    dangerous_op()
-
-# ============================================
-# Styled Prompt
-# ============================================
-
-# Basic prompt
-name = ASCIIColors.prompt("Your name: ", color=ASCIIColors.color_green)
-
-# Hidden input (password)
-password = ASCIIColors.prompt(
-    "Password: ",
-    hide_input=True,
-    color=ASCIIColors.color_magenta
-)
-
-# Styled prompt with underline
-api_key = ASCIIColors.prompt(
-    "API Key: ",
-    color=ASCIIColors.color_cyan,
-    style=ASCIIColors.style_underline
-)
-
-# ============================================
-# Enhanced Exception Display
-# ============================================
-
-from ascii_colors import trace_exception, get_trace_exception
-
-try:
-    risky_operation()
-except Exception as e:
-    # Log with standard traceback
-    trace_exception(e, enhanced=False)
-    
-    # Or display beautiful enhanced traceback
-    formatted = get_trace_exception(e, enhanced=True, max_width=120)
-    print(formatted)
-    # Shows: Boxed frame with file paths, line numbers, source code,
-    #        local variables in each frame, and formatted exception
-
-# Direct enhanced display
-try:
-    1/0
-except Exception as e:
-    trace_exception(e, enhanced=True)  # Full visual traceback
+# Conditional questions
+is_company = questionary.confirm("Company account?").ask()
+company_name = questionary.text("Company name").skip_if(
+    not is_company, default="N/A"
+).ask()
 ```
 
 ---
 
-## 🪵 Complete Logging Guide
-
-### Basic Configuration
+### 🛠️ Utility Functions
 
 ```python
-import sys
-from ascii_colors import (
-    ASCIIColors, LogLevel, basicConfig, getLogger,
-    ConsoleHandler, FileHandler, RotatingFileHandler,
-    Formatter, JSONFormatter
+from ascii_colors import ASCIIColors, get_trace_exception
+
+# Execute with spinner animation
+def long_task():
+    time.sleep(3)
+    return "result"
+
+result = ASCIIColors.execute_with_animation(
+    "Processing...",
+    long_task,
+    color=ASCIIColors.color_yellow
 )
 
-# ============================================
-# Quick Start with basicConfig
-# ============================================
-
-# Console-only, simple format
-basicConfig(
-    level=DEBUG,
-    format='%(levelname)s: %(message)s'
-)
-
-# With timestamp and source location
-basicConfig(
-    level=INFO,
-    format='%(asctime)s [%(levelname)-8s] %(name)s:%(funcName)s:%(lineno)d - %(message)s',
-    datefmt='%H:%M:%S',
-    stream=sys.stdout
-)
-
-# With file output
-basicConfig(
-    level=DEBUG,
-    format='%(asctime)s | %(levelname)s | %(message)s',
-    filename='app.log',
-    filemode='a'  # 'a' append, 'w' overwrite
-)
-
-# Force reconfiguration (closes existing handlers)
-basicConfig(
-    level=WARNING,
-    format='%(message)s',
-    force=True
-)
-
-# ============================================
-# Manual Configuration (Full Control)
-# ============================================
-
-# Clear any existing configuration
-ASCIIColors.clear_handlers()
-
-# Console handler: colorful, brief, INFO+
-console = ConsoleHandler(stream=sys.stdout, level=LogLevel.INFO)
-console.setFormatter(Formatter(
-    "{level_name:>8} | {message}",  # Brace style format
-    style='{'
-))
-ASCIIColors.add_handler(console)
-
-# Debug file: detailed, all levels
-debug_file = FileHandler("debug.log", mode='a', level=LogLevel.DEBUG)
-debug_file.setFormatter(Formatter(
-    "%(asctime)s | %(levelname)-8s | %(name)s | %(funcName)s:%(lineno)d | %(message)s",
-    include_source=True  # Include file:line:function
-))
-ASCIIColors.add_handler(debug_file)
-
-# Rotating file: auto-rotate when size exceeded
-rotating = RotatingFileHandler(
-    "app.log",
-    maxBytes=10*1024*1024,  # 10 MB
-    backupCount=5,          # Keep 5 backups: app.log, app.log.1, ..., app.log.5
-    level=LogLevel.INFO
-)
-rotating.setFormatter(JSONFormatter(
-    include_fields=["timestamp", "levelname", "name", "message", "pathname", "lineno"]
-))
-ASCIIColors.add_handler(rotating)
-
-# Set global level
-ASCIIColors.set_log_level(LogLevel.DEBUG)
-
-# Usage
-logger = getLogger("MyApp")
-logger.info("Application started")  # Goes to all handlers
-logger.debug("Debug info")          # Goes to debug_file only
-```
-
-### Context-Aware Logging
-
-```python
-from ascii_colors import ASCIIColors, Formatter
-
-# ============================================
-# Persistent Context
-# ============================================
-
-# Set once, included in all subsequent logs
-ASCIIColors.set_context(
-    app_name="MyService",
-    app_version="1.2.3",
-    environment="production"
-)
-
-# All logs now include these fields
-formatter = Formatter(
-    "[{asctime}] {app_name}/{app_version} [{levelname}] {message}",
-    style='{'
-)
-
-# ============================================
-# Temporary Context (Context Manager)
-# ============================================
-
-# Context automatically restored after block
-with ASCIIColors.context(
-    request_id="req-abc-123",
-    user_id="user-456",
-    trace_id="trace-xyz"
-):
-    # All logs in this block include request_id, user_id, trace_id
-    # Plus the previously set app_name, app_version, environment
-    ASCIIColors.info("Processing request")
-    ASCIIColors.debug("Request details: ...")
-    try:
-        process()
-    except Exception as e:
-        ASCIIColors.error("Request failed: %s", e)
-
-# After block: request_id, user_id, trace_id no longer included
-# But app_name, app_version, environment still present
-ASCIIColors.info("Cleanup complete")
-
-# ============================================
-# Thread-Local Context
-# ============================================
-
-import threading
-
-def worker(thread_id):
-    # Each thread has its own isolated context
-    ASCIIColors.set_context(thread=thread_id, worker_type="background")
-    ASCIIColors.info("Worker starting")  # Includes this thread's context
+# Enhanced exception display
+try:
+    risky_operation()
+except Exception as e:
+    # Beautiful traceback with local variables
+    formatted = get_trace_exception(e, enhanced=True)
+    print(formatted)
     
-    with ASCIIColors.context(task_id=f"task-{thread_id}"):
-        do_work()
-        ASCIIColors.info("Task complete")  # Includes thread + task context
-    
-    ASCIIColors.info("Worker done")  # Back to thread context only
+    # Or log it
+    ASCIIColors.trace_exception(e, enhanced=True)
 
-# Spawn workers
-for i in range(5):
-    threading.Thread(target=worker, args=(i,)).start()
-```
-
-### Formatters in Detail
-
-```python
-from ascii_colors import Formatter, JSONFormatter, LogLevel
-
-# ============================================
-# Formatter Styles
-# ============================================
-
-# Percent style (like standard logging)
-percent_fmt = Formatter(
-    "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    style='%'
-)
-
-# Brace style (Python str.format)
-brace_fmt = Formatter(
-    "{asctime} [{level_name:>8}] {name}: {message}",
-    datefmt="%H:%M:%S",
-    style='{'
-)
-
-# With source information
-source_fmt = Formatter(
-    "[{func_name}:{lineno}] {message}",
-    include_source=True,
-    style='{'
-)
-
-# ============================================
-# JSON Formatter
-# ============================================
-
-# All fields
-json_all = JSONFormatter()  # Includes all standard fields
-
-# Selected fields only
-json_select = JSONFormatter(
-    include_fields=[
-        "timestamp", "levelname", "name", "message",
-        "pathname", "lineno", "funcName", "thread", "process"
+# Multicolor text
+ASCIIColors.multicolor(
+    ["Status: ", "ACTIVE", " | Load: ", "85%"],
+    [
+        ASCIIColors.color_white,
+        ASCIIColors.color_green,
+        ASCIIColors.color_white,
+        ASCIIColors.color_yellow
     ]
 )
 
-# Custom date format
-json_iso = JSONFormatter(
-    include_fields=["timestamp", "levelname", "message"],
-    datefmt="iso"  # ISO 8601 format
+# Highlight patterns
+ASCIIColors.highlight(
+    "ERROR: File not found",
+    subtext=["ERROR", "not found"],
+    highlight_color=ASCIIColors.color_bright_red
 )
-
-# Pretty-printed (for development)
-json_pretty = JSONFormatter(
-    include_fields=["levelname", "name", "message"],
-    json_indent=2
-)
-```
-
-### Advanced Handler Configuration
-
-```python
-from ascii_colors import (
-    ASCIIColors, LogLevel,
-    ConsoleHandler, FileHandler, RotatingFileHandler,
-    Formatter, JSONFormatter
-)
-import sys
-
-# ============================================
-# Handler-Specific Levels
-# ============================================
-
-# Console: only warnings and above
-console = ConsoleHandler(stream=sys.stdout, level=LogLevel.WARNING)
-console.setFormatter(Formatter(
-    "{level_name}: {message}",
-    style='{'
-))
-
-# Debug file: everything
-debug_file = FileHandler("debug.log", level=LogLevel.DEBUG)
-debug_file.setFormatter(Formatter(
-    "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
-))
-
-ASCIIColors.add_handler(console)
-ASCIIColors.add_handler(debug_file)
-ASCIIColors.set_log_level(LogLevel.DEBUG)  # Global level
-
-# Result:
-# logger.debug("msg")  # Only to debug.log
-# logger.warning("msg")  # To both console and debug.log
-
-# ============================================
-# Multiple Formatters Example
-# ============================================
-
-# Human-readable console output
-human = ConsoleHandler(sys.stdout, level=LogLevel.INFO)
-human.setFormatter(Formatter(
-    "{level_name:>8} | {message}",
-    style='{'
-))
-
-# Structured JSON for log aggregation
-machine = FileHandler("events.jsonl", level=LogLevel.INFO)
-machine.setFormatter(JSONFormatter(
-    include_fields=["timestamp", "level", "name", "message", "context"]
-))
-
-# Detailed debug log
-detailed = FileHandler("verbose.log", level=LogLevel.DEBUG)
-detailed.setFormatter(Formatter(
-    "%(asctime)s.%(msecs)03d | %(levelname)-8s | %(name)s:%(funcName)s:%(lineno)d | %(message)s",
-    datefmt="%H:%M:%S",
-    include_source=True
-))
-
-ASCIIColors.add_handler(human)
-ASCIIColors.add_handler(machine)
-ASCIIColors.add_handler(detailed)
 ```
 
 ---
 
 ## 🎨 Complete Color & Style Reference
-
-All constants available as `ASCIIColors.<name>` or direct import:
 
 ### Reset
 | Constant | Effect |
@@ -987,11 +746,11 @@ All constants available as `ASCIIColors.<name>` or direct import:
 | `style_underline` | `\u001b[4m` | Underline |
 | `style_blink` | `\u001b[5m` | Slow blink |
 | `style_blink_fast` | `\u001b[6m` | Rapid blink |
-| `style_reverse` | `\u001b[7m` | Reverse video (swap fg/bg) |
+| `style_reverse` | `\u001b[7m` | Reverse video |
 | `style_hidden` | `\u001b[8m` | Hidden/Concealed |
 | `style_strikethrough` | `\u001b[9m` | Strikethrough |
 
-### Foreground Colors (Standard)
+### Foreground Colors
 | Constant | Code | Constant | Code |
 |:---|:---|:---|:---|
 | `color_black` | 30 | `color_bright_black` | 90 |
@@ -1017,28 +776,6 @@ All constants available as `ASCIIColors.<name>` or direct import:
 | `color_bg_white` | 47 | `color_bg_bright_white` | 107 |
 | `color_bg_orange` | 48;5;208 | — | — |
 
-### Combining Styles
-
-```python
-from ascii_colors import ASCIIColors
-
-# Multiple styles
-alert = (
-    ASCIIColors.style_bold +
-    ASCIIColors.style_underline +
-    ASCIIColors.color_bright_red
-)
-ASCIIColors.print("CRITICAL ALERT", color=alert)
-
-# Full styling
-ASCIIColors.print(
-    " Success ",
-    color=ASCIIColors.color_black,
-    background=ASCIIColors.color_bg_bright_green,
-    style=ASCIIColors.style_bold
-)
-```
-
 ---
 
 ## 🔄 Migration Guides
@@ -1048,26 +785,15 @@ ASCIIColors.print(
 ```python
 # Before (standard logging)
 import logging
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("myapp")
 
 # After (ascii_colors) — identical API!
 import ascii_colors as logging  # Just change the import!
-
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("myapp")
 
-# Additional features available:
-logger = logging.getLogger("myapp")
-logger.addHandler(logging.FileHandler("app.jsonl"))  # Add file output
-# etc.
+# Plus: colorful output, JSON formatters, contextual logging, etc.
 ```
 
 ### From `colorama`
@@ -1076,19 +802,11 @@ logger.addHandler(logging.FileHandler("app.jsonl"))  # Add file output
 # Before (colorama)
 from colorama import init, Fore, Back, Style
 init()
-
 print(Fore.RED + "Error" + Style.RESET_ALL)
-print(Back.GREEN + Fore.BLACK + "Success" + Style.RESET_ALL)
 
-# After (ascii_colors) — more intuitive, no init needed!
+# After (ascii_colors)
 from ascii_colors import ASCIIColors
-
-ASCIIColors.red("Error")  # Auto-reset
-ASCIIColors.print(
-    "Success",
-    color=ASCIIColors.color_black,
-    background=ASCIIColors.color_bg_green
-)
+ASCIIColors.red("Error")  # Auto-reset, more intuitive
 
 # Plus: backgrounds, styles, bright colors, logging, progress bars, etc.
 ```
@@ -1098,19 +816,15 @@ ASCIIColors.print(
 ```python
 # Before (tqdm)
 from tqdm import tqdm
-import time
+for i in tqdm(range(100)):
+    pass
 
-for i in tqdm(range(100), desc="Processing"):
-    time.sleep(0.01)
-
-# After (ascii_colors) — similar API, more styling!
+# After (ascii_colors)
 from ascii_colors import ProgressBar
-import time
+for i in ProgressBar(range(100), color=ASCIIColors.color_cyan):
+    pass
 
-for i in ProgressBar(range(100), desc="Processing", color=ASCIIColors.color_cyan):
-    time.sleep(0.01)
-
-# Additional: custom chars, colors, styles, thread-safe, manual control
+# Plus: custom chars, colors, styles, thread-safe, manual control
 ```
 
 ### From `questionary`
@@ -1118,27 +832,45 @@ for i in ProgressBar(range(100), desc="Processing", color=ASCIIColors.color_cyan
 ```python
 # Before (questionary)
 import questionary
-
 name = questionary.text("Name?").ask()
-proceed = questionary.confirm("Continue?").ask()
 
 # After (ascii_colors) — drop-in replacement!
 from ascii_colors import questionary  # Just change the import!
-
 name = questionary.text("Name?").ask()
-proceed = questionary.confirm("Continue?").ask()
 
-# Plus: enhanced styling, validation, forms, better error handling
+# Plus: enhanced styling, no dependencies, built-in integration
+```
+
+### From `rich`
+
+```python
+# Before (rich)
+from rich import print
+from rich.panel import Panel
+from rich.table import Table
+
+print(Panel("Hello"))
+
+# After (ascii_colors) — familiar API, no dependency!
+from ascii_colors import rich
+
+rich.print(rich.Panel("Hello"))
+
+# Or use convenience methods
+from ascii_colors import ASCIIColors
+ASCIIColors.panel("Hello")
+
+# Plus: zero dependencies, lighter weight, integrates with logging
 ```
 
 ---
 
 ## 📚 Documentation & Resources
 
-- **[Full Documentation](https://parisneo.github.io/ascii_colors/)** — Complete API reference, guides, and examples
-- **[PyPI Package](https://pypi.org/project/ascii-colors/)** — Release history, statistics, and installation
-- **[GitHub Repository](https://github.com/ParisNeo/ascii_colors)** — Source code, issues, and contributions
-- **[Changelog](CHANGELOG.md)** — Detailed version history and migration notes
+- **[Full Documentation](https://parisneo.github.io/ascii_colors/)** — Complete guides, API reference, and examples
+- **[PyPI Package](https://pypi.org/project/ascii-colors/)** — Release history and installation
+- **[GitHub Repository](https://github.com/ParisNeo/ascii_colors)** — Source code and contributions
+- **[Changelog](CHANGELOG.md)** — Version history and migration notes
 
 ---
 
@@ -1166,12 +898,12 @@ pytest tests/  # Run the test suite
 
 ### Colors not showing in Windows
 - Windows 10 version 1511+ supports ANSI colors natively
-- For older Windows, colors should still work in modern terminal emulators (Windows Terminal, VS Code terminal)
-- Legacy CMD may require `colorama` installation: `pip install colorama`
+- For older systems, use Windows Terminal or VS Code terminal
+- Legacy CMD may need `colorama`: `pip install colorama`
 
 ### Progress bar width issues with wide characters
 ```bash
-pip install wcwidth  # For accurate emoji/CJK character width detection
+pip install wcwidth
 ```
 
 ### Logging not appearing
@@ -1187,7 +919,7 @@ Apache License 2.0 — see [LICENSE](LICENSE) for full details.
 
 ---
 
-**Ready to make your CLI applications shine?** 
+**Ready to make your CLI applications shine?**
 
 ```bash
 pip install ascii_colors
