@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - chore(release): bump version to 0.11.6 and update .gitignore
 
+## [2026-02-16 02:08]
+
+- feat(logging): add logging compatibility layer with rich terminal support
+
 ## [2026-02-13 15:38]
 
 - chore(release): bump version to 0.11.11 with docs cleanup and threading fix

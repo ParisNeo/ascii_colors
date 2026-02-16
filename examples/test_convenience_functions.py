@@ -21,7 +21,7 @@ def test_panel():
     
     # Styled panel with different border
     ASCIIColors.panel(
-        "[bold red]This is a warning message with important information.\nAnd this is a  new line[/bold red]",
+        "[bold red]This is a warning message with important information.\nAnd this is a  new line[/bold red]\nAnd We cna also have [red]A TEST[/red]",
         title="[bold yellow]⚠ Warning[/bold yellow]",
         border_style="bold yellow",
         box="round",
