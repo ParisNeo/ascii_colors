@@ -394,6 +394,9 @@ class ASCIIColors(ANSI):
         """
         from ascii_colors.rich import Panel, BoxStyle, Style, Console, Text
         import re
+
+        # make sure content is str
+        content = str(content)
         
         # Convert string box name to enum
         box_style = BoxStyle.SQUARE
