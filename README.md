@@ -322,6 +322,7 @@ def fibonacci(n):
         yield a
         a, b = b, a + b
 '''
+
 ASCIIColors.syntax(python_code, language="python", line_numbers=True)
 
 # JSON
@@ -330,6 +331,7 @@ json_code = '''{
     "version": "1.0.0",
     "features": ["colors", "logging", "progress", "panels"]
 }'''
+
 ASCIIColors.syntax(json_code, language="json")
 
 # Other languages: javascript, bash, yaml, sql, text
@@ -443,6 +445,262 @@ with ASCIIColors.status("Connecting...") as status:
     status.update("Authenticating...")
     time.sleep(1)
     status.update("Fetching data...")
+```
+
+---
+
+### 🔄 Advanced Rich Patterns
+
+#### Combining Live with Panels and Tables
+
+Create professional dashboards that update in real-time:
+
+```python
+from ascii_colors import ASCIIColors, rich
+from ascii_colors.rich import Panel, Table, Text, Columns
+import time
+import random
+
+def create_dashboard(status, progress, logs):
+    """Build a multi-panel dashboard layout."""
+    # Status panel
+    status_panel = Panel(
+        f"[bold cyan]{status}[/bold cyan]",
+        title="[bold]System Status[/bold]",
+        border_style="green" if "healthy" in status.lower() else "yellow",
+        width=40
+    )
+    
+    # Progress panel with bar
+    bar = "█" * (progress // 5) + "░" * (20 - progress // 5)
+    progress_panel = Panel(
+        f"[bold]{bar}[/bold] {progress}%",
+        title="[bold]Progress[/bold]",
+        border_style="cyan",
+        width=40
+    )
+    
+    # Recent logs panel
+    log_text = "\n".join([f"[dim]{i+1}.[/dim] {log}" for i, log in enumerate(logs[-5:])])
+    logs_panel = Panel(
+        log_text or "[dim]No recent activity...[/dim]",
+        title="[bold]Recent Logs[/bold]",
+        border_style="magenta",
+        height=10
+    )
+    
+    # Metrics table
+    metrics = Table("Metric", "Value", "Trend", box="minimal")
+    metrics.add_row("CPU", f"{random.randint(20,80)}%", "[green]▼[/green]" if random.random() > 0.5 else "[red]▲[/red]")
+    metrics.add_row("Memory", f"{random.randint(40,90)}%", "[green]▼[/green]" if random.random() > 0.5 else "[red]▲[/red]")
+    metrics.add_row("Disk", f"{random.randint(50,95)}%", "[yellow]−[/yellow]")
+    
+    # Combine in columns
+    top_row = Columns([status_panel, progress_panel], equal=True)
+    
+    return Text.assemble(
+        top_row, "\n",
+        logs_panel, "\n",
+        metrics
+    )
+
+# Simulate live dashboard
+logs = []
+with ASCIIColors.live(create_dashboard("Initializing...", 0, logs), refresh_per_second=4) as live:
+    for i in range(101):
+        # Simulate work
+        if i % 10 == 0:
+            logs.append(f"Completed milestone {i//10}")
+        
+        status = "Healthy" if i < 80 else "Degraded" if i < 95 else "Critical"
+        dashboard = create_dashboard(status, i, logs)
+        live.update(dashboard)
+        time.sleep(0.05)
+    
+    # Final state
+    logs.append("Process completed successfully")
+    live.update(create_dashboard("Complete", 100, logs))
+    time.sleep(1)
+```
+
+#### Nested Live Updates with Tables Inside Panels
+
+```python
+from ascii_colors import ASCIIColors, rich
+from ascii_colors.rich import Panel, Table, Text, Tree
+import time
+
+# File processing with live updates
+files = ["data_001.csv", "data_002.csv", "data_003.csv", "report.pdf", "summary.json"]
+
+with ASCIIColors.live("Preparing...", refresh_per_second=2) as live:
+    for i, filename in enumerate(files):
+        # Build processing table
+        table = Table("File", "Status", "Progress", "Size")
+        
+        for j, f in enumerate(files):
+            if j < i:
+                status = "[green]✓ Complete[/green]"
+                progress = "[green]100%[/green]"
+                size = f"{random.randint(100, 5000)} KB"
+            elif j == i:
+                status = "[yellow]⏳ Processing...[/yellow]"
+                prog_val = random.randint(10, 90)
+                bar = "█" * (prog_val // 10) + "░" * (10 - prog_val // 10)
+                progress = f"[yellow]{bar} {prog_val}%[/yellow]"
+                size = "..."
+            else:
+                status = "[dim]⏸ Pending[/dim]"
+                progress = "[dim]0%[/dim]"
+                size = "-"
+            
+            table.add_row(f, status, progress, size)
+        
+        # Wrap in panel with dynamic title
+        panel = Panel(
+            table,
+            title=f"[bold]Batch Processing ({i+1}/{len(files)})[/bold]",
+            border_style="cyan"
+        )
+        
+        live.update(panel)
+        time.sleep(1.5)
+    
+    # Final success panel
+    final_table = Table("File", "Status", "Size")
+    for f in files:
+        final_table.add_row(f, "[green]✓ Complete[/green]", f"{random.randint(100, 5000)} KB")
+    
+    success_panel = Panel(
+        final_table,
+        title="[bold green]✓ All Files Processed[/bold green]",
+        border_style="green"
+    )
+    live.update(success_panel)
+    time.sleep(2)
+```
+
+#### Custom Console Instances
+
+Create multiple consoles with different configurations:
+
+```python
+from ascii_colors import rich
+from ascii_colors.rich import Console, Panel, Table
+
+# Main console with full features
+main_console = Console()
+
+# Compact console for side panels
+compact_console = Console(width=50, no_color=False)
+
+# Log console (records output)
+log_console = Console(record=True)
+
+# Use different consoles
+main_console.print(Panel("Main Application", title="App"))
+compact_console.print(Panel("Side Info", title="Compact"))
+
+# Log and export
+log_console.log("Event 1")
+log_console.log("Event 2")
+log_content = log_console.export_text()  # Capture for file/email
+
+# Jupyter-friendly console
+jupyter_console = Console(force_jupyter=True)
+jupyter_console.print("[blue]Notebook output[/blue]")
+```
+
+#### Status Spinner with Nested Live Display
+
+Combine background status with foreground live updates:
+
+```python
+from ascii_colors import ASCIIColors, rich
+from ascii_colors.rich import Text
+import time
+
+# Long-running operation with status and detailed progress
+with ASCIIColors.status("Analyzing dataset...", spinner="dots") as status:
+    # Simulate initial phase
+    time.sleep(2)
+    status.update("Loading data into memory...")
+    
+    # Switch to live display for detailed progress
+    with ASCIIColors.live(Text("[dim]Preparing analysis...[/dim]"), refresh_per_second=2) as live:
+        for phase, duration in [("Cleaning", 2), ("Transforming", 3), ("Computing", 4)]:
+            for i in range(duration * 2):
+                progress = (i / (duration * 2)) * 100
+                bar = "█" * int(progress / 5) + "░" * (20 - int(progress / 5))
+                live.update(Text(
+                    f"[bold cyan]{phase}:[/bold cyan] [{bar}] {progress:.0f}%\n"
+                    f"[dim]Processing records...[/dim]"
+                ))
+                time.sleep(0.5)
+            
+            status.update(f"Completed {phase.lower()}")
+        
+        live.update(Text("[bold green]✓ Analysis Complete[/bold green]"))
+        time.sleep(1)
+    
+    status.update("Saving results...")
+    time.sleep(1)
+```
+
+#### Rich Print with Conditional Formatting
+
+```python
+from ascii_colors import rich
+
+# Simulate API responses
+responses = [
+    {"status": 200, "time": 45},
+    {"status": 404, "time": 120},
+    {"status": 500, "time": 30},
+    {"status": 200, "time": 25},
+]
+
+for resp in responses:
+    # Dynamic coloring based on status
+    color = "green" if resp["status"] == 200 else "yellow" if resp["status"] < 500 else "red"
+    status_icon = "✓" if resp["status"] == 200 else "⚠" if resp["status"] < 500 else "✗"
+    
+    rich.print(
+        f"[{color}]{status_icon}[/{color}] "
+        f"Status: [bold]{resp['status']}[/bold] "
+        f"([{color}]{resp['time']}ms[/{color}])"
+    )
+```
+
+#### Panel with Internal Table and Tree
+
+```python
+from ascii_colors import ASCIIColors, rich
+from ascii_colors.rich import Panel, Table, Tree
+
+# Build complex nested layout
+tree = Tree("[bold]Project Structure[/bold]")
+src = tree.add_node("[blue]src/[/blue]")
+src.add("[green]__init__.py[/green]")
+src.add("[green]main.py[/green]")
+tests = tree.add_node("[blue]tests/[/blue]")
+tests.add("[green]test_main.py[/green]")
+
+stats_table = Table("Metric", "Value", box="minimal")
+stats_table.add_row("Files", "12")
+stats_table.add_row("Lines", "1,247")
+stats_table.add_row("Coverage", "[green]87%[/green]")
+
+# Combine in a single panel with tree and table
+combined_content = f"{tree}\n\n{stats_table}"
+dashboard_panel = Panel(
+    combined_content,
+    title="[bold cyan]📊 Project Dashboard[/bold cyan]",
+    border_style="cyan",
+    padding=(1, 2)
+)
+
+rich.print(dashboard_panel)
 ```
 
 ---

@@ -43,9 +43,10 @@ class Live:
         self.get_renderable = get_renderable
         self._refresh_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
-        self._rendered_content: List[str] = []
+        self._rendered_lines: int = 0
         self._lock = threading.Lock()
         self._cursor_hidden: bool = False
+        self._started: bool = False
     
     def __enter__(self) -> "Live":
         self.start()
@@ -62,8 +63,11 @@ class Live:
         # Hide cursor once at start to prevent flicker
         self._hide_cursor()
         
-        # Do initial render
-        self._render()
+        # Do initial render without clearing (no previous content)
+        self._rendered_lines = 0
+        self._started = False
+        self._render(clear=False)
+        self._started = True
         
         # Start auto-refresh thread if enabled
         if self.auto_refresh:
@@ -82,6 +86,31 @@ class Live:
             _builtin_print("\033[?25h", end="", flush=True, file=self.console.file)
             self._cursor_hidden = False
     
+    def _clear_previous(self) -> None:
+        """Clear previously rendered lines."""
+        if self._rendered_lines <= 0:
+            return
+        
+        # Move cursor up to the first line of previous content
+        if self._rendered_lines > 1:
+            _builtin_print(f"\033[{self._rendered_lines}A", end="", file=self.console.file)
+        
+        # Move to start of line
+        _builtin_print("\r", end="", file=self.console.file)
+        
+        # Clear each line and move down
+        for i in range(self._rendered_lines):
+            _builtin_print("\033[K", end="", file=self.console.file)  # Clear entire line
+            if i < self._rendered_lines - 1:
+                _builtin_print("\n", end="", file=self.console.file)
+        
+        # Move back up to the first line
+        if self._rendered_lines > 1:
+            _builtin_print(f"\033[{self._rendered_lines - 1}A", end="", file=self.console.file)
+        
+        # Ensure we're at the start of the first line
+        _builtin_print("\r", end="", flush=True, file=self.console.file)
+    
     def stop(self) -> None:
         """Stop the live display."""
         self._stop_event.set()
@@ -89,13 +118,13 @@ class Live:
         if self._refresh_thread:
             self._refresh_thread.join(timeout=1)
         
-        # Show cursor again
+        # Show cursor and ensure we end on a new line
         self._show_cursor()
         
         if self.screen:
             self.console.restore_screen()
         
-        # Move to new line after stopping
+        # Move to new line and flush
         _builtin_print("", file=self.console.file)
     
     def _refresh_loop(self) -> None:
@@ -105,55 +134,56 @@ class Live:
             if not self._stop_event.is_set():
                 self.refresh()
     
-    def _render(self, clear: bool = True) -> None:
+    def _render(self, clear: bool = True, force: bool = False) -> None:
         """Render current content with minimal flicker."""
         with self._lock:
+            # Clear previous content if we've already rendered
+            if clear and self._started and self._rendered_lines > 0:
+                self._clear_previous()
+            
             renderable = self.renderable
             if self.get_renderable:
                 renderable = self.get_renderable()
             
             if renderable is None:
+                self._rendered_lines = 0
                 return
             
             # Process string renderables through markup
             if isinstance(renderable, str):
-                renderable = Text(renderable)
+                # Apply markup processing to strings with potential markup
+                if '[' in renderable and ']' in renderable:
+                    processed = self.console._apply_markup(renderable)
+                    renderable = Text(processed)
+                else:
+                    renderable = Text(renderable)
             
             # Ensure Text objects get markup processed
             if isinstance(renderable, Text):
-                # Apply markup to the text content if it contains tags
-                if '[' in str(renderable.plain) and ']' in str(renderable.plain):
-                    processed = self.console._apply_markup(str(renderable.plain))
-                    # Create new Text with processed content, preserving styles
+                text_str = str(renderable.plain) if isinstance(renderable.plain, str) else str(renderable)
+                # Check if the plain text still contains unprocessed markup
+                if '[' in text_str and ']' in text_str and not text_str.startswith('\033['):
+                    processed = self.console._apply_markup(text_str)
                     renderable = Text(processed, style=renderable.style, justify=renderable.justify)
             
             # Render to lines
             lines = self.console.render(renderable)
             
-            # Clear previous content by moving up and clearing lines (not full screen)
-            if clear and self._rendered_content:
-                lines_to_clear = len(self._rendered_content)
-                # Move cursor up to the first line of previous content
-                if lines_to_clear > 1:
-                    _builtin_print(f"\033[{lines_to_clear - 1}A", end="", file=self.console.file)
-                # Move to beginning of line and clear each line
-                for _ in range(lines_to_clear):
-                    _builtin_print("\r\033[K", end="", file=self.console.file)
-                    if _ < lines_to_clear - 1:
-                        _builtin_print("\033[B", end="", file=self.console.file)
-                # Move back up to the first line position
-                if lines_to_clear > 1:
-                    _builtin_print(f"\033[{lines_to_clear - 1}A", end="", file=self.console.file)
+            # Filter out empty trailing lines for accurate counting
+            while lines and len(lines) > 0 and str(lines[-1]).strip() == "":
+                lines.pop()
             
-            # Store current content length for next clear
-            self._rendered_content = lines
+            # Count actual lines for next clear
+            self._rendered_lines = len(lines)
             
-            # Print new content
+            # Print new content - each line on its own row
             for i, line in enumerate(lines):
+                line_str = str(line)
                 if i > 0:
                     _builtin_print("\n", end="", file=self.console.file)
-                _builtin_print(line, end="", file=self.console.file)
+                _builtin_print(line_str, end="", file=self.console.file)
             
+            # Flush output
             _builtin_print("", end="", flush=True, file=self.console.file)
     
     def update(self, renderable: Renderable, *, refresh: bool = False) -> None:
@@ -166,7 +196,7 @@ class Live:
     
     def refresh(self) -> None:
         """Force a refresh."""
-        self._render()
+        self._render(clear=True)
 
 
 class Status:
@@ -227,13 +257,12 @@ class Status:
             plain_line = re.sub(r"\033\[[0-9;]+m", "", line)
             
             # Move to start of line, clear to end, print new content
-            # Use carriage return for smooth in-place update
             if self._last_line_length > len(plain_line):
                 # Previous line was longer, need extra clearing
                 padding = " " * (self._last_line_length - len(plain_line))
-                _builtin_print(f"\r{line}{padding}\r{line}", end="", flush=True, file=self.console.file)
+                _builtin_print(f"\r\033[K{line}{padding}", end="", flush=True, file=self.console.file)
             else:
-                _builtin_print(f"\r{line}", end="", flush=True, file=self.console.file)
+                _builtin_print(f"\r\033[K{line}", end="", flush=True, file=self.console.file)
             
             self._last_line_length = len(plain_line)
     
@@ -273,7 +302,7 @@ class Status:
             self._cursor_hidden = False
         
         # Clear the line and move to new line
-        _builtin_print(f"\r{' ' * (self._last_line_length + 10)}\r", end="", file=self.console.file)
+        _builtin_print(f"\r\033[K", end="", file=self.console.file)
         _builtin_print("", file=self.console.file)
     
     def update(self, status: str, *, spinner: Optional[str] = None, speed: Optional[float] = None) -> None:

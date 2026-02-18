@@ -378,7 +378,7 @@ class ASCIIColors(ANSI):
     # ============== New Rich-style methods ==============
     @staticmethod
     def panel(
-        content: str,
+        content: str|dict,
         title: Optional[str] = None,
         border_style: str = "",
         box: str = "square",
@@ -389,14 +389,28 @@ class ASCIIColors(ANSI):
     ) -> str:
         """
         Create a bordered panel around content. Returns string for printing.
-        
+
         New rich-style convenience method.
         """
         from ascii_colors.rich import Panel, BoxStyle, Style, Console, Text
         import re
 
-        # make sure content is str
-        content = str(content)
+        def format_dict(d: dict, indent: int = 0) -> str:
+            lines = []
+            tab = "    " * indent
+            for key, val in d.items():
+                if isinstance(val, dict):
+                    nested = format_dict(val, indent + 1)
+                    lines.append(f"{tab}[bold]{key}[/bold]:\n{nested}")
+                else:
+                    lines.append(f"{tab}[bold]{key}[/bold]: {val}")
+            return "\n".join(lines)
+
+        # Convert dict to formatted string with rich markup
+        if isinstance(content, dict):
+            content = format_dict(content)
+        else:
+            content = str(content)
         
         # Convert string box name to enum
         box_style = BoxStyle.SQUARE

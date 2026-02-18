@@ -36,7 +36,7 @@ def demo_panels():
     
     # Double border panel
     panel = Panel(
-        "Secure connection established\nEncryption: AES-256-GCM",
+        "[red bold]Secure[/red bold] connection established\nEncryption: AES-256-GCM",
         title="🔒 Security",
         border_style="bold green",
         box=BoxStyle.DOUBLE,
