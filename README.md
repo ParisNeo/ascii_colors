@@ -50,7 +50,7 @@ ASCIIColors offers **three complementary approaches** that work seamlessly toget
 |:---|:---|:---|
 | **Direct Print** | Immediate visual feedback, status messages, user interaction | `ASCIIColors.green("text")` |
 | **Logging System** | Structured application logs, filtering, multiple outputs | `import ascii_colors as logging` |
-| **Rich Components** | Beautiful UI: panels, tables, trees, syntax highlighting | `ASCIIColors.panel()` or `rich.print()` |
+| **Rich Components** | Beautiful UI: panels, tables, trees, syntax highlighting | `ASCIIColors.panel()` or `ASCIIColors.rich_print()` |
 
 ### 1. Direct Print — Instant Visual Feedback
 
@@ -132,7 +132,7 @@ ASCIIColors.table(
 root = ASCIIColors.tree("📁 project")
 root.add("📁 src").add("📄 main.py")
 root.add("📁 tests")
-rich.print(root)
+ASCIIColors.rich_print(root)
 
 # Syntax highlighting for code
 code = "def hello(): print('world')"
@@ -191,29 +191,29 @@ ASCIIColors.print(
 Use Rich-style markup for inline styling anywhere:
 
 ```python
-from ascii_colors import rich, ASCIIColors
+from ascii_colors import ASCIIColors
 
 # Basic colors
-rich.print("[red]Error[/red] [green]Success[/green] [blue]Info[/blue]")
-rich.print("[yellow]Warning[/yellow] [magenta]Accent[/magenta] [cyan]Highlight[/cyan]")
+ASCIIColors.rich_print("[red]Error[/red] [green]Success[/green] [blue]Info[/blue]")
+ASCIIColors.rich_print("[yellow]Warning[/yellow] [magenta]Accent[/magenta] [cyan]Highlight[/cyan]")
 
 # Styles
-rich.print("[bold]Bold[/bold] [italic]Italic[/italic] [underline]Underlined[/underline]")
-rich.print("[dim]Dimmed[/dim] [blink]Blink[/blink]")
+ASCIIColors.rich_print("[bold]Bold[/bold] [italic]Italic[/italic] [underline]Underlined[/underline]")
+ASCIIColors.rich_print("[dim]Dimmed[/dim] [blink]Blink[/blink]")
 
 # Bright colors
-rich.print("[bright_red]Bright red[/bright_red] [bright_green]Bright green[/bright_green]")
+ASCIIColors.rich_print("[bright_red]Bright red[/bright_red] [bright_green]Bright green[/bright_green]")
 
 # Backgrounds
-rich.print("[on red]White on red[/on red]")
-rich.print("[bold white on blue]Bold white on blue[/bold white on blue]")
+ASCIIColors.rich_print("[on red]White on red[/on red]")
+ASCIIColors.rich_print("[bold white on blue]Bold white on blue[/bold white on blue]")
 
 # Semantic tags
-rich.print("[success]Operation completed[/success]")
-rich.print("[error]An error occurred[/error]")
-rich.print("[warning]Warning message[/warning]")
-rich.print("[info]Information[/info]")
-rich.print("[danger]Critical issue[/danger]")
+ASCIIColors.rich_print("[success]Operation completed[/success]")
+ASCIIColors.rich_print("[error]An error occurred[/error]")
+ASCIIColors.rich_print("[warning]Warning message[/warning]")
+ASCIIColors.rich_print("[info]Information[/info]")
+ASCIIColors.rich_print("[danger]Critical issue[/danger]")
 
 # Method alias on ASCIIColors
 ASCIIColors.rich_print("[bold green]Hello World[/bold green]")
@@ -228,7 +228,7 @@ ASCIIColors includes a complete **Rich-compatible** rendering layer — no exter
 #### Panels
 
 ```python
-from ascii_colors import ASCIIColors, rich
+from ascii_colors import ASCIIColors
 
 # Simple panel
 ASCIIColors.panel("Hello, World!", title="Greeting")
@@ -242,8 +242,8 @@ ASCIIColors.panel(
     padding=(1, 2)         # (vertical, horizontal)
 )
 
-# Using rich module for more control
-from ascii_colors.rich import Panel, BoxStyle
+# Using rich compatible module for more control
+from ascii_colors import Panel, BoxStyle
 
 panel = Panel(
     "Content with [bold]markup[/bold] support",
@@ -253,13 +253,13 @@ panel = Panel(
     padding=(2, 4),
     width=60
 )
-rich.print(panel)
+ASCIIColors.rich_print(panel)
 ```
 
 #### Tables
 
 ```python
-from ascii_colors import ASCIIColors, rich
+from ascii_colors import ASCIIColors
 
 # Simple table
 ASCIIColors.table(
@@ -289,7 +289,7 @@ ASCIIColors.table(
 #### Trees
 
 ```python
-from ascii_colors import ASCIIColors, rich
+from ascii_colors import ASCIIColors
 
 # Build a file tree
 root = ASCIIColors.tree("📁 project", style="bold")
@@ -305,7 +305,7 @@ tests.add("📄 test_main.py")
 root.add("📄 README.md")
 root.add("📄 pyproject.toml")
 
-rich.print(root)
+ASCIIColors.rich_print(root)
 ```
 
 #### Syntax Highlighting
@@ -384,7 +384,7 @@ ASCIIColors.columns(*items, equal=True, width=30)
 #### Rules (Dividers)
 
 ```python
-from ascii_colors import ASCIIColors, rich
+from ascii_colors import ASCIIColors
 
 # Simple rule
 ASCIIColors.rule()
@@ -404,8 +404,8 @@ ASCIIColors.rule("Double", characters="═", style="blue")
 #### Live Displays
 
 ```python
-from ascii_colors import ASCIIColors, rich
-from ascii_colors.rich import Text
+from ascii_colors import ASCIIColors
+from ascii_colors import Text
 import time
 
 # Progress with live update
@@ -456,8 +456,8 @@ with ASCIIColors.status("Connecting...") as status:
 Create professional dashboards that update in real-time:
 
 ```python
-from ascii_colors import ASCIIColors, rich
-from ascii_colors.rich import Panel, Table, Text, Columns
+from ascii_colors import ASCIIColors
+from ascii_colors import Panel, Table, Text, Columns
 import time
 import random
 
@@ -526,8 +526,8 @@ with ASCIIColors.live(create_dashboard("Initializing...", 0, logs), refresh_per_
 #### Nested Live Updates with Tables Inside Panels
 
 ```python
-from ascii_colors import ASCIIColors, rich
-from ascii_colors.rich import Panel, Table, Text, Tree
+from ascii_colors import ASCIIColors
+from ascii_colors import Panel, Table, Text, Tree
 import time
 
 # File processing with live updates
@@ -585,8 +585,8 @@ with ASCIIColors.live("Preparing...", refresh_per_second=2) as live:
 Create multiple consoles with different configurations:
 
 ```python
-from ascii_colors import rich
-from ascii_colors.rich import Console, Panel, Table
+from ascii_colors import ASCOIIColors
+from ascii_colors import Console, Panel, Table
 
 # Main console with full features
 main_console = Console()
@@ -616,8 +616,8 @@ jupyter_console.print("[blue]Notebook output[/blue]")
 Combine background status with foreground live updates:
 
 ```python
-from ascii_colors import ASCIIColors, rich
-from ascii_colors.rich import Text
+from ascii_colors import ASCIIColors
+from ascii_colors import Text
 import time
 
 # Long-running operation with status and detailed progress
@@ -650,7 +650,7 @@ with ASCIIColors.status("Analyzing dataset...", spinner="dots") as status:
 #### Rich Print with Conditional Formatting
 
 ```python
-from ascii_colors import rich
+from ascii_colors import ASCIIColors
 
 # Simulate API responses
 responses = [
@@ -665,7 +665,7 @@ for resp in responses:
     color = "green" if resp["status"] == 200 else "yellow" if resp["status"] < 500 else "red"
     status_icon = "✓" if resp["status"] == 200 else "⚠" if resp["status"] < 500 else "✗"
     
-    rich.print(
+    ASCIIColors.rich_print(
         f"[{color}]{status_icon}[/{color}] "
         f"Status: [bold]{resp['status']}[/bold] "
         f"([{color}]{resp['time']}ms[/{color}])"
@@ -675,8 +675,8 @@ for resp in responses:
 #### Panel with Internal Table and Tree
 
 ```python
-from ascii_colors import ASCIIColors, rich
-from ascii_colors.rich import Panel, Table, Tree
+from ascii_colors import ASCIIColors
+from ascii_colors import Panel, Table, Tree
 
 # Build complex nested layout
 tree = Tree("[bold]Project Structure[/bold]")
@@ -700,7 +700,7 @@ dashboard_panel = Panel(
     padding=(1, 2)
 )
 
-rich.print(dashboard_panel)
+ASCIIColors.rich_print(dashboard_panel)
 ```
 
 ---
@@ -1112,7 +1112,7 @@ print(Panel("Hello"))
 # After (ascii_colors) — familiar API, no dependency!
 from ascii_colors import rich
 
-rich.print(rich.Panel("Hello"))
+ASCIIColors.rich_print(rich.Panel("Hello"))
 
 # Or use convenience methods
 from ascii_colors import ASCIIColors

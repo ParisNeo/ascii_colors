@@ -4,6 +4,7 @@ Layout components: Panel, Padding, and Columns.
 """
 
 import re
+import textwrap
 from typing import Dict, Iterable, Iterator, List, Optional, Tuple, Union, TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
@@ -15,6 +16,96 @@ from ascii_colors.rich.text import Text, Renderable, wcswidth
 
 # Import Measurement at module level for type annotations
 from ascii_colors.rich.console import Measurement
+
+# ANSI escape sequence regex - compile once for efficiency
+ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]+m")
+
+
+def visual_width(text: str) -> int:
+    """Calculate the visual width of text, ignoring ANSI escape codes.
+    
+    This properly handles emojis and wide characters (CJK, etc.) which
+    typically take 2 terminal columns instead of 1.
+    
+    Args:
+        text: String that may contain ANSI escape codes
+    
+    Returns:
+        Visual width in terminal columns
+    """
+    plain = ANSI_ESCAPE.sub("", text)
+    return wcswidth(plain)
+
+
+def wrap_line_preserving_ansi(line: str, max_width: int) -> List[str]:
+    """Wrap a line that may contain ANSI codes and emojis.
+    
+    Handles:
+    - ANSI escape codes (preserved but don't count towards width)
+    - Emojis and wide characters (properly counted as 2 columns)
+    - Existing ANSI reset codes are stripped from wrapped lines to avoid
+      color bleed, then re-applied if needed
+    
+    Args:
+        line: The line to wrap (may contain ANSI codes)
+        max_width: Maximum visual width per line
+    
+    Returns:
+        List of wrapped lines
+    """
+    if not line:
+        return [""]
+    
+    # Check if line fits without wrapping
+    if visual_width(line) <= max_width:
+        return [line]
+    
+    # Need to wrap - handle ANSI codes and wide characters carefully
+    result_lines = []
+    current_line = ""
+    current_visual_width = 0
+    i = 0
+    line_len = len(line)
+    
+    while i < line_len:
+        # Check for ANSI escape sequence
+        if line[i:i+2] == '\033[':
+            # Find end of ANSI sequence
+            j = i + 2
+            while j < line_len and line[j] not in 'ABCDEFGHJKSTfmnsulh':
+                j += 1
+            if j < line_len:
+                j += 1  # Include the final character
+            # Add ANSI code without counting towards visual width
+            current_line += line[i:j]
+            i = j
+        else:
+            # Regular character - check visual width
+            char = line[i]
+            char_width = wcswidth(char)
+            
+            # Handle potential multi-byte characters
+            if char_width > 1 and i + 1 < line_len:
+                # Check if this might be part of a multi-byte sequence
+                # For emojis specifically, they're usually single Unicode chars
+                pass
+            
+            # Check if adding this char would exceed width
+            if current_visual_width + char_width > max_width and current_line:
+                # Start a new line
+                result_lines.append(current_line)
+                current_line = ""
+                current_visual_width = 0
+            
+            current_line += char
+            current_visual_width += char_width
+            i += 1
+    
+    # Add remaining content
+    if current_line:
+        result_lines.append(current_line)
+    
+    return result_lines if result_lines else [""]
 
 
 class Padding:
@@ -73,7 +164,14 @@ class Padding:
 
 
 class Panel:
-    """A bordered panel around content."""
+    """A bordered panel around content.
+    
+    This class properly handles:
+    - Emoji and wide characters (counted as 2 terminal columns)
+    - Rich markup tags like [bold], [red], etc.
+    - ANSI escape codes for colors and styles
+    - Multi-line content with proper wrapping
+    """
     
     def __init__(
         self,
@@ -125,12 +223,16 @@ class Panel:
     ) -> Iterator[Union[str, Renderable]]:
         chars = self.box.get_chars()
         
+        # Cap panel width to terminal width with safety margin
+        max_safe_width = min(options.max_width, console.width - 2) if hasattr(console, 'width') else options.max_width - 2
+        max_safe_width = max(max_safe_width, 20)  # Minimum width
+        
         if self.width:
-            panel_width = min(self.width, options.max_width)
+            panel_width = min(self.width, max_safe_width)
         elif self.expand:
-            panel_width = options.max_width
+            panel_width = max_safe_width
         else:
-            panel_width = options.max_width
+            panel_width = max_safe_width
         
         inner_width = panel_width - 2
         
@@ -141,66 +243,86 @@ class Panel:
         
         content_width = inner_width - (pad_x * 2)
         content_width = max(content_width, 1)
-        
+
+        # Ensure content_width is at least 1
+        content_width = max(content_width, 20)
+
         # Render content to list of strings first to properly handle multi-line
         content_lines: List[str] = []
-        
+
+        def wrap_line_with_ansi(line: str, max_width: int) -> List[str]:
+            """Wrap a line that may contain ANSI codes, preserving them correctly.
+
+            This handles emojis and wide characters properly by using visual width.
+            """
+            if not line:
+                return [""]
+
+            # Check if line fits without wrapping
+            plain = ansi_escape.sub("", line)
+            if wcswidth(plain) <= max_width:
+                return [line]
+
+            # Need to wrap - must handle ANSI codes and wide characters carefully
+            result_lines = []
+            current_line = ""
+            current_visual_width = 0
+            i = 0
+
+            while i < len(line):
+                # Check for ANSI escape sequence
+                if line[i:i+2] == '\033[':
+                    # Find end of ANSI sequence (ends with letter A-Z or m)
+                    j = i + 2
+                    while j < len(line) and line[j] not in 'ABCDEFGHJKSTfmnsulh':
+                        j += 1
+                    if j < len(line):
+                        j += 1  # Include the final character
+                    # Add ANSI code without counting towards visual width
+                    current_line += line[i:j]
+                    i = j
+                else:
+                    # Regular character - check visual width
+                    # Handle multi-byte characters (emojis, CJK, etc.)
+                    char = line[i]
+
+                    # Try to get multi-byte character if this is start of one
+                    if ord(char) > 127 or char == '\ufffd':
+                        # Could be start of multi-byte, try to get full character
+                        # Emojis can be 1-4 bytes in UTF-8
+                        char_width = wcswidth(char)
+                    else:
+                        char_width = wcswidth(char)
+
+                    # Check if adding this char would exceed width
+                    if current_visual_width + char_width > max_width and current_line:
+                        # Start a new line
+                        # Strip trailing ANSI reset to avoid color bleed issues
+                        result_lines.append(current_line)
+                        current_line = ""
+                        current_visual_width = 0
+
+                    current_line += char
+                    current_visual_width += char_width
+                    i += 1
+
+            # Add remaining content
+            if current_line:
+                result_lines.append(current_line)
+
+            return result_lines if result_lines else [""]
+
         if isinstance(self.renderable, str):
             # For strings, apply markup processing first
             processed = console._apply_markup(self.renderable) if console.markup else self.renderable
-            
+
             # Split by explicit newlines first, then wrap each line if needed
             explicit_lines = processed.split('\n')
-            
+
             for line in explicit_lines:
-                # Check if line needs wrapping
-                plain_line = re.sub(r"\033\[[0-9;]+m", "", line)
-                line_len = wcswidth(plain_line)
-                
-                if line_len <= content_width:
-                    # Line fits, add as-is
-                    content_lines.append(line)
-                else:
-                    # Line too long, need to wrap
-                    # But be careful with ANSI codes - wrap by visible width
-                    import textwrap
-                    # For lines with ANSI codes, we need special handling
-                    if '\033[' in line:
-                        # Wrap manually preserving ANSI codes
-                        current_line = ""
-                        current_width = 0
-                        i = 0
-                        while i < len(line):
-                            # Check for ANSI escape sequence
-                            if line[i:i+2] == '\033[':
-                                # Find end of sequence
-                                j = i + 2
-                                while j < len(line) and line[j] not in 'ABCDEFGHJKSTfmnsulh':
-                                    j += 1
-                                if j < len(line):
-                                    j += 1  # Include the final character
-                                # Add the ANSI code to current line without counting width
-                                current_line += line[i:j]
-                                i = j
-                            else:
-                                # Regular character
-                                char_width = wcswidth(line[i])
-                                if current_width + char_width > content_width and current_width > 0:
-                                    # Start new line
-                                    content_lines.append(current_line)
-                                    current_line = line[i]
-                                    current_width = char_width
-                                else:
-                                    current_line += line[i]
-                                    current_width += char_width
-                                i += 1
-                        # Don't forget the last line
-                        if current_line:
-                            content_lines.append(current_line)
-                    else:
-                        # No ANSI codes, safe to use textwrap
-                        wrapped = textwrap.wrap(line, width=content_width)
-                        content_lines.extend(wrapped)
+                # Use the new wrapper that handles ANSI + emojis
+                wrapped = wrap_line_with_ansi(line, content_width)
+                content_lines.extend(wrapped)
         elif isinstance(self.renderable, Text):
             # For Text objects, get the plain content and process
             plain_content = str(self.renderable.plain) if isinstance(self.renderable.plain, str) else str(self.renderable.plain)
@@ -347,16 +469,36 @@ class Panel:
         ansi_escape = re.compile(r"\033\[[0-9;]+m")
         
         def plain_width(text: str) -> int:
+            """Calculate visual width of text, stripping ANSI codes.
+            
+            This properly handles emojis and wide characters which take
+            2 terminal columns instead of 1.
+            """
             plain = ansi_escape.sub("", text)
             return wcswidth(plain)
         
         def pad_line(line: str, width: int) -> str:
-            # Calculate width from plain text, but preserve ANSI codes
-            line_width = plain_width(line)
-            if line_width < width:
-                # Add padding spaces - ANSI codes are preserved in line
-                return line + " " * (width - line_width)
-            # If line is longer than target width, return as-is (don't truncate)
+            """Pad a line to the specified visual width.
+            
+            This properly handles:
+            - ANSI escape codes (don't count towards width)
+            - Emojis and wide characters (count as 2 columns each)
+            
+            Args:
+                line: The line to pad (may contain ANSI codes)
+                width: Target visual width (number of terminal columns)
+            
+            Returns:
+                The line padded with spaces to reach the target visual width
+            """
+            # Calculate visual width: strip ANSI codes first, then measure
+            plain = ansi_escape.sub("", line)
+            visual_width = wcswidth(plain)
+            
+            if visual_width < width:
+                # Need padding - add spaces to reach target visual width
+                return line + " " * (width - visual_width)
+            # If line is at or exceeds target width, return as-is
             return line
         
         # Build top border with title if present
@@ -420,6 +562,10 @@ class Panel:
         for line in content_lines:
             # Strip any trailing newlines or carriage returns
             line = line.rstrip('\n\r')
+            
+            # Calculate the visual width of this line (including emojis)
+            # and ensure it fits within content_width
+            visual_len = wcswidth(ansi_escape.sub("", line))
             
             padded_content = pad_line(line, content_width)
             

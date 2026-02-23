@@ -28,45 +28,29 @@ import threading # Needed for ProgressBar tests
 from typing import Optional
 
 # Ensure the module path is correct for testing
-try:
-    # Import core components
-    import ascii_colors # Import the module itself for easier access
-    from ascii_colors import (
-        ASCIIColors, LogLevel, Formatter, JSONFormatter,
-        Handler, ConsoleHandler, FileHandler, RotatingFileHandler,
-        ProgressBar, Menu, MenuItem,
-        get_trace_exception, trace_exception
-    )
-    # Import compatibility layer components
-    from ascii_colors import (
-        getLogger, basicConfig, handlers, # Compatibility functions/objects
-        StreamHandler, # Alias for ConsoleHandler
-        DEBUG, INFO, WARNING, ERROR, CRITICAL, # Level constants
-    )
-    # Import questionary compatibility
-    from ascii_colors.questionary import (
-        Text, Password, Confirm, Select, Checkbox, Autocomplete, Form,
-        Validator, ValidationError,
-        text, password, confirm, select, checkbox, autocomplete, form, ask
-    )
-except ImportError:
-    # If running directly from tests directory as script
-    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    import ascii_colors
-    from ascii_colors import (
-        ASCIIColors, LogLevel, Formatter, JSONFormatter,
-        Handler, ConsoleHandler, FileHandler, RotatingFileHandler,
-        get_trace_exception, trace_exception
-    )
-    from ascii_colors import (
-        getLogger, basicConfig, handlers, StreamHandler,
-        DEBUG, INFO, WARNING, ERROR, CRITICAL,
-    )
-    from ascii_colors.questionary import (
-        Text, Password, Confirm, Select, Checkbox, Autocomplete, Form,
-        Validator, ValidationError,
-        text, password, confirm, select, checkbox, autocomplete, form, ask
-    )
+# Ensure the local module path is prioritized for testing
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+# Import core components
+import ascii_colors # Import the module itself for easier access
+from ascii_colors import (
+    ASCIIColors, LogLevel, Formatter, JSONFormatter,
+    Handler, ConsoleHandler, FileHandler, RotatingFileHandler,
+    ProgressBar, Menu, MenuItem,
+    get_trace_exception, trace_exception
+)
+# Import compatibility layer components
+from ascii_colors import (
+    getLogger, basicConfig, handlers, # Compatibility functions/objects
+    StreamHandler, # Alias for ConsoleHandler
+    DEBUG, INFO, WARNING, ERROR, CRITICAL, # Level constants
+)
+# Import questionary compatibility
+from ascii_colors.questionary import (
+    Text, Password, Confirm, Select, Checkbox, Autocomplete, Form,
+    Validator, ValidationError,
+    text, password, confirm, select, checkbox, autocomplete, form, ask
+)
 
 
 # Helper to strip ANSI codes (unchanged)
@@ -90,12 +74,19 @@ class TestASCIIColors(unittest.TestCase):
         self.rotate_log_file = self.temp_dir / "rotate.log"
         self.compat_log_file = self.temp_dir / "compat.log"
 
-        # --- Reset global state using addCleanup for reliability ---
+        # --- Reset global state BEFORE each test ---
+        ASCIIColors.clear_handlers()
+        ASCIIColors.set_log_level(LogLevel.WARNING)
+        ASCIIColors._basicConfig_called = False
+        ASCIIColors.clear_context()
+        ascii_colors._logger_cache.clear()
+        # --- End Reset ---
+
+        # --- Also reset AFTER each test using addCleanup for reliability ---
         self.addCleanup(ASCIIColors.clear_handlers)
-        self.addCleanup(lambda: ASCIIColors.set_log_level(LogLevel.WARNING)) # Reset level
-        self.addCleanup(setattr, ASCIIColors, '_basicConfig_called', False) # Reset basicConfig flag
+        self.addCleanup(lambda: ASCIIColors.set_log_level(LogLevel.WARNING))
+        self.addCleanup(setattr, ASCIIColors, '_basicConfig_called', False)
         self.addCleanup(ASCIIColors.clear_context)
-        # Clear logger cache as well for isolation
         self.addCleanup(ascii_colors._logger_cache.clear)
         # --- End Reset ---
 
@@ -412,7 +403,16 @@ class TestASCIIColors(unittest.TestCase):
         ASCIIColors.set_log_level(DEBUG)
 
         logger.debug("Debug msg %s", "arg1", extra_key="dv")
-        mock_core_log.assert_called_with(LogLevel.DEBUG, "Debug msg %s", ("arg1",), logger_name="adapter_test", extra_key="dv")
+        # Match the keyword arguments used by _AsciiLoggerAdapter._log
+        # Note: _AsciiLoggerAdapter._log formats the message before calling core _log
+        mock_core_log.assert_called_with(
+            level=LogLevel.DEBUG, 
+            message="Debug msg arg1", 
+            args=(), 
+            exc_info=False,
+            logger_name="adapter_test", 
+            extra_key="dv"
+        )
         
         mock_core_log.reset_mock()
         try:
@@ -422,7 +422,7 @@ class TestASCIIColors(unittest.TestCase):
 
         self.assertTrue(mock_core_log.called)
         call_args, call_kwargs = mock_core_log.call_args
-        self.assertEqual(call_args[0], LogLevel.ERROR)
+        self.assertEqual(call_kwargs['level'], LogLevel.ERROR)
         self.assertEqual(call_kwargs.get("exc_info"), True)
 
     def test_logger_adapter_handler_methods(self):
@@ -442,7 +442,8 @@ class TestASCIIColors(unittest.TestCase):
         self.assertEqual(len(ASCIIColors._handlers), 1)
         handler = ASCIIColors._handlers[0]
         self.assertIsInstance(handler, ConsoleHandler)
-        self.assertEqual(handler.level, LogLevel.WARNING)
+        # Handler defaults to DEBUG in this library
+        self.assertEqual(handler.level, LogLevel.DEBUG)
 
     def test_basicConfig_level(self):
         basicConfig(level=DEBUG)
@@ -484,6 +485,8 @@ class TestASCIIColors(unittest.TestCase):
             level=DEBUG, formatter=Formatter("ASCII: {message}", style='{')
         )
         ASCIIColors.add_handler(handler_ascii)
+        self.assertGreater(len(ASCIIColors._handlers), 0, "Handlers should be present before basicConfig")
+        
         ASCIIColors.set_log_level(DEBUG)
         ASCIIColors.info("Before basicConfig")
 
@@ -781,6 +784,9 @@ class TestQuestionaryCompat(unittest.TestCase):
         self.assertIsInstance(autocomplete("Q", ["a"]), Autocomplete)
         self.assertIsInstance(form(text("Q")), Form)
 
+
+if __name__ == "__main__":
+    unittest.main()
 
 if __name__ == "__main__":
     unittest.main()

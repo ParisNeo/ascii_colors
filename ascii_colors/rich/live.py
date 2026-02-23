@@ -91,25 +91,16 @@ class Live:
         if self._rendered_lines <= 0:
             return
         
-        # Move cursor up to the first line of previous content
+        # If we rendered multiple lines, we need to move up to the first line
         if self._rendered_lines > 1:
-            _builtin_print(f"\033[{self._rendered_lines}A", end="", file=self.console.file)
-        
-        # Move to start of line
-        _builtin_print("\r", end="", file=self.console.file)
-        
-        # Clear each line and move down
-        for i in range(self._rendered_lines):
-            _builtin_print("\033[K", end="", file=self.console.file)  # Clear entire line
-            if i < self._rendered_lines - 1:
-                _builtin_print("\n", end="", file=self.console.file)
-        
-        # Move back up to the first line
-        if self._rendered_lines > 1:
+            # \033[A moves cursor up one line
+            # We need to move up (count - 1) lines
             _builtin_print(f"\033[{self._rendered_lines - 1}A", end="", file=self.console.file)
-        
-        # Ensure we're at the start of the first line
-        _builtin_print("\r", end="", flush=True, file=self.console.file)
+            
+        # Move to the beginning of the current line and clear everything below
+        # \r moves to start of line
+        # \033[J clears from cursor to end of screen
+        _builtin_print("\r\033[J", end="", flush=True, file=self.console.file)
     
     def stop(self) -> None:
         """Stop the live display."""
@@ -137,7 +128,7 @@ class Live:
     def _render(self, clear: bool = True, force: bool = False) -> None:
         """Render current content with minimal flicker."""
         with self._lock:
-            # Clear previous content if we've already rendered
+            # STEP 1: Clear previous content FIRST
             if clear and self._started and self._rendered_lines > 0:
                 self._clear_previous()
             
@@ -151,7 +142,6 @@ class Live:
             
             # Process string renderables through markup
             if isinstance(renderable, str):
-                # Apply markup processing to strings with potential markup
                 if '[' in renderable and ']' in renderable:
                     processed = self.console._apply_markup(renderable)
                     renderable = Text(processed)
@@ -161,7 +151,6 @@ class Live:
             # Ensure Text objects get markup processed
             if isinstance(renderable, Text):
                 text_str = str(renderable.plain) if isinstance(renderable.plain, str) else str(renderable)
-                # Check if the plain text still contains unprocessed markup
                 if '[' in text_str and ']' in text_str and not text_str.startswith('\033['):
                     processed = self.console._apply_markup(text_str)
                     renderable = Text(processed, style=renderable.style, justify=renderable.justify)
@@ -173,10 +162,12 @@ class Live:
             while lines and len(lines) > 0 and str(lines[-1]).strip() == "":
                 lines.pop()
             
-            # Count actual lines for next clear
-            self._rendered_lines = len(lines)
+            # Count lines BEFORE printing
+            new_line_count = len(lines)
+            self._rendered_lines = new_line_count
+            self._started = True
             
-            # Print new content - each line on its own row
+            # STEP 2: Print new content - each line on its own row
             for i, line in enumerate(lines):
                 line_str = str(line)
                 if i > 0:

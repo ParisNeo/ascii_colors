@@ -46,7 +46,11 @@ class ASCIIColors(ANSI):
 
     @classmethod
     def clear_handlers(cls) -> None:
-        with cls._handler_lock: cls._handlers.clear()
+        with cls._handler_lock:
+            for h in cls._handlers:
+                try: h.close()
+                except Exception: pass
+            cls._handlers.clear()
 
     @classmethod
     def set_context(cls, **kwargs: Any) -> None:
@@ -87,7 +91,9 @@ class ASCIIColors(ANSI):
         
         if level < cls._global_level: return
         ts = datetime.now()
-        final_msg = (message % args) if args else message
+        # NOTE: We now expect message to be pre-formatted by the caller
+        # This allows the logging adapter to handle its own formatting
+        final_msg = message
         
         final_exc = None
         if exc_info:

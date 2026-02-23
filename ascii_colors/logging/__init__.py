@@ -114,21 +114,18 @@ class _AsciiLoggerAdapter:
     
     def _log(self, level: LogLevel, msg: str, args: Tuple, **kwargs) -> None:
         """Internal logging method."""
-        # Format message with args if provided
-        if args:
-            try:
-                msg = msg % args
-            except (TypeError, ValueError):
-                pass
-        
         # Get exception info if requested
         exc_info = kwargs.get('exc_info', False)
+        
+        # Format message here before passing to ASCIIColors._log
+        # ASCIIColors._log expects pre-formatted message
+        formatted_msg = (msg % args) if args else msg
         
         # Call ASCIIColors._log with logger name
         ASCIIColors._log(
             level=level,
-            message=msg,
-            args=(),
+            message=formatted_msg,
+            args=(),  # Already formatted, no args needed
             exc_info=exc_info,
             logger_name=self.name,
             **{k: v for k, v in kwargs.items() if k not in ('exc_info', 'stack_info', 'extra')}
@@ -215,14 +212,24 @@ def basicConfig(
     
     Mirrors logging.basicConfig() for drop-in compatibility.
     """
-    if ASCIIColors._basicConfig_called and not force:
+    # Check if already configured (thread-safe)
+    with ASCIIColors._handler_lock:
+        handler_count = len(ASCIIColors._handlers)
+        already_configured = ASCIIColors._basicConfig_called
+    
+    # If already configured (either via basicConfig or manually adding handlers), do nothing unless forced
+    if (already_configured or handler_count > 0) and not force:
         return
+    
+    # Mark as configured (thread-safe)
+    with ASCIIColors._handler_lock:
+        ASCIIColors._basicConfig_called = True
     
     if force:
         ASCIIColors.clear_handlers()
         _logger_cache.clear()
     
-    # Set level if provided
+    # Set level if provided (only after we've determined we should configure)
     if level is not None:
         ASCIIColors.set_log_level(level)
     
