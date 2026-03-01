@@ -14,6 +14,12 @@ from ascii_colors.core import ASCIIColors
 from ascii_colors.handlers import Handler, ConsoleHandler, FileHandler, RotatingFileHandler, StreamHandler
 from ascii_colors.formatters import Formatter, JSONFormatter
 
+# Expose context methods for compatibility
+set_context = ASCIIColors.set_context
+clear_context = ASCIIColors.clear_context
+context = ASCIIColors.context
+get_thread_context = ASCIIColors.get_thread_context
+
 
 # Cache for logger adapters
 _logger_cache: Dict[str, "_AsciiLoggerAdapter"] = {}

@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - chore(release): bump version to 0.11.6 and update .gitignore
 
+## [2026-03-01 15:01]
+
+- feat: expose context management methods at module level
+
 ## [2026-02-23 02:38]
 
 - refactor: improve logging thread safety and Rich component rendering

@@ -16,6 +16,12 @@ from ascii_colors.core import ASCIIColors
 from ascii_colors.progress import ProgressBar
 from ascii_colors.menu import Menu, MenuItem
 
+# Expose context methods at module level for convenience
+set_context = ASCIIColors.set_context
+clear_context = ASCIIColors.clear_context
+context = ASCIIColors.context
+get_thread_context = ASCIIColors.get_thread_context
+
 # Logging compatibility
 from ascii_colors.logging import (
     getLogger, basicConfig, shutdown, _logger_cache, _AsciiLoggerAdapter
@@ -102,6 +108,8 @@ __all__ = [
     "ASCIIColors", "LogLevel", "Formatter", "JSONFormatter", "Handler",
     "ConsoleHandler", "StreamHandler", "FileHandler", "RotatingFileHandler",
     "handlers", "ProgressBar", "Menu", "MenuItem",
+    # Context management
+    "set_context", "clear_context", "context", "get_thread_context",
     # Logging compat
     "getLogger", "basicConfig", "shutdown", "trace_exception", 
     "strip_ansi", "get_trace_exception",
