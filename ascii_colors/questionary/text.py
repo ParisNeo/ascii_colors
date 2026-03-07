@@ -18,7 +18,7 @@ class PromptText(Question):
         self.multiline = kwargs.get('multiline', False)
     
     def _ask_internal(self) -> str:
-        color = self.style.get('question', ANSI.color_bright_yellow)
+        color = self._get_style('question', ANSI.color_bright_yellow)
         
         while True:
             # Process message for rich markup - get ANSI codes applied

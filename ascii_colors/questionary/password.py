@@ -34,7 +34,7 @@ class Password(PromptText):
     
     def _ask_internal(self) -> str:
         import getpass
-        color = self.style.get('question', ANSI.color_bright_yellow)
+        color = self._get_style('question', ANSI.color_bright_yellow)
         
         while True:
             # Process message for rich markup

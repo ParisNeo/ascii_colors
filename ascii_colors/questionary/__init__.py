@@ -8,6 +8,8 @@ from ascii_colors.questionary.base import (
     Question,
     Validator,
     ValidationError,
+    Style,
+    Separator,
 )
 
 from ascii_colors.questionary.text import (
@@ -57,6 +59,8 @@ __all__ = [
     "Question",
     "Validator",
     "ValidationError",
+    "Style",
+    "Separator",
     # Question types
     "Text",  # This is PromptText, for questionary API compatibility
     "PromptText",  # Also expose the explicit name

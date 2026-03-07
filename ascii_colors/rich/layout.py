@@ -196,7 +196,34 @@ class Panel:
         self.width = width
         self.height = height
         self.expand = expand
-        
+
+    @classmethod
+    def fit(
+        cls,
+        renderable: Union[Renderable, str],
+        title: Optional[str] = None,
+        title_align: str = "center",
+        style: Optional[Union[str, Style]] = None,
+        border_style: Optional[Union[str, Style]] = None,
+        box: Union[BoxStyle, str] = BoxStyle.SQUARE,
+        padding: Union[int, Tuple[int, ...]] = (0, 1),
+        width: Optional[int] = None,
+        height: Optional[int] = None,
+    ) -> "Panel":
+        """Create a panel that is just wide enough to fit its content."""
+        return cls(
+            renderable,
+            title=title,
+            title_align=title_align,
+            style=style,
+            border_style=border_style,
+            box=box,
+            padding=padding,
+            width=width,
+            height=height,
+            expand=False,
+        )
+
     def _normalize_padding(
         self,
         pad: Union[int, Tuple[int, ...]]
@@ -603,6 +630,63 @@ class Panel:
         if self.width:
             return Measurement(self.width, self.width)
         return Measurement(10, options.max_width)
+
+
+class Rule(Renderable):
+    """A horizontal rule with optional title."""
+
+    def __init__(
+        self,
+        title: str = "",
+        characters: str = "─",
+        style: Optional[Union[str, Style]] = None,
+        align: str = "center",
+    ):
+        self.title = title
+        self.characters = characters
+        self.style = style if isinstance(style, Style) else (Style.parse(style) if style else None)
+        self.align = align
+
+    def __rich_console__(
+        self,
+        console: "Console",
+        options: "ConsoleOptions",
+    ) -> Iterator[str]:
+        width = options.max_width
+        style_ansi = str(self.style) if self.style else ""
+        reset = ANSI.color_reset
+
+        if self.title:
+            title_clean = console._apply_markup(self.title) if console.markup else self.title
+            title_plain = re.sub(r"\033\[[0-9;]+m", "", title_clean)
+            title_width = wcswidth(title_plain)
+            char_width = width - title_width - 2
+
+            if self.align == "left":
+                left, right = 0, char_width
+            elif self.align == "right":
+                left, right = char_width, 0
+            else:
+                left = char_width // 2
+                right = char_width - left
+
+            left_part = self.characters * left
+            right_part = self.characters * right
+
+            if style_ansi:
+                yield f"{style_ansi}{left_part}{reset} {title_clean} {style_ansi}{right_part}{reset}"
+            else:
+                yield f"{left_part} {title_clean} {right_part}"
+        else:
+            line = self.characters * width
+            yield f"{style_ansi}{line}{reset}" if style_ansi else line
+
+    def __rich_measure__(
+        self,
+        console: "Console",
+        options: "ConsoleOptions",
+    ) -> "Measurement":
+        return Measurement(1, options.max_width)
 
 
 class Columns:

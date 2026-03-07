@@ -14,6 +14,22 @@ from ascii_colors.rich.style import Style, BoxStyle
 from ascii_colors.rich.text import Text, Renderable, wcswidth
 
 
+class Column:
+    """Configuration for a table column."""
+    def __init__(
+        self,
+        header: str = "",
+        style: Optional[Union[str, Style]] = None,
+        no_wrap: bool = False,
+        width: Optional[int] = None,
+        justify: str = "left",
+    ):
+        self.header = header
+        self.style = style if isinstance(style, Style) else (Style.parse(style) if style else None)
+        self.no_wrap = no_wrap
+        self.width = width
+        self.justify = justify
+
 class Table(Renderable):
     """A table with rows and columns."""
     
@@ -24,7 +40,7 @@ class Table(Renderable):
         caption: Optional[str] = None,
         width: Optional[int] = None,
         min_width: Optional[int] = None,
-        box: Union[BoxStyle, str] = BoxStyle.SQUARE,
+        box: Optional[Union[BoxStyle, str]] = BoxStyle.SQUARE,
         padding: Tuple[int, int] = (0, 1),
         collapse_padding: bool = False,
         pad_edge: bool = True,
@@ -38,12 +54,12 @@ class Table(Renderable):
         row_styles: Optional[List[Union[str, Style]]] = None,
         border_style: Optional[Union[str, Style]] = None,
     ):
-        self.headers = list(headers)
+        self.columns: List[Column] = [Column(header=h) for h in headers]
         self.title = title
         self.caption = caption
         self.width = width
         self.min_width = min_width
-        self.box = box if isinstance(box, BoxStyle) else BoxStyle.SQUARE
+        self.box = box if (isinstance(box, BoxStyle) or box is None) else BoxStyle.SQUARE
         self.padding = padding
         self.collapse_padding = collapse_padding
         self.pad_edge = pad_edge
@@ -57,6 +73,17 @@ class Table(Renderable):
         self.row_styles = row_styles or []
         self.border_style = border_style
         self.rows: List[List[str]] = []
+
+    def add_column(
+        self,
+        header: str = "",
+        style: Optional[Union[str, Style]] = None,
+        no_wrap: bool = False,
+        width: Optional[int] = None,
+        justify: str = "left",
+    ) -> None:
+        """Add a column to the table."""
+        self.columns.append(Column(header=header, style=style, no_wrap=no_wrap, width=width, justify=justify))
     
     def add_row(self, *cells: str, style: Optional[Union[str, Style]] = None) -> None:
         """Add a row to the table."""
@@ -67,10 +94,10 @@ class Table(Renderable):
         console: "Console",
         options: "ConsoleOptions",
     ) -> Iterator[Union[str, Renderable]]:
-        chars = self.box.get_chars()
+        chars = self.box.get_chars() if self.box else None
         max_width = self.width or options.max_width
         
-        col_count = len(self.headers)
+        col_count = len(self.columns)
         if col_count == 0:
             return
         
@@ -79,8 +106,8 @@ class Table(Renderable):
         
         # Process headers with markup and calculate widths
         processed_headers = []
-        for i, h in enumerate(self.headers):
-            processed = console._apply_markup(h) if console.markup else h
+        for i, col in enumerate(self.columns):
+            processed = console._apply_markup(col.header) if console.markup else col.header
             processed_headers.append(processed)
             plain = re.sub(r"\x1b\[[0-9;]*m", "", processed)
             col_widths[i] = max(col_widths[i], wcswidth(plain))
@@ -103,7 +130,9 @@ class Table(Renderable):
             col_widths[i] += pad_x * 2
         
         # Calculate total table width
-        total_width = sum(col_widths) + (col_count + 1)  # +1 for each vertical border
+        # If no box, we only have separators between columns (col_count - 1)
+        border_count = (col_count + 1) if chars else (col_count - 1 if col_count > 1 else 0)
+        total_width = sum(col_widths) + border_count
         
         # Expand or shrink to fit
         if self.expand and total_width < max_width:
@@ -139,7 +168,7 @@ class Table(Renderable):
             yield ""
         
         # Top border
-        if self.show_edge:
+        if self.show_edge and chars:
             parts = [chars["top_left"]]
             for i, w in enumerate(col_widths):
                 parts.append(chars["horizontal"] * w)
@@ -151,27 +180,41 @@ class Table(Renderable):
         
         # Header row
         if self.show_header:
-            parts = [chars["vertical"]]
+            parts = [chars["vertical"]] if chars else []
             for i, (h, w) in enumerate(zip(processed_headers, col_widths)):
+                col_def = self.columns[i]
                 plain_h = re.sub(r"\x1b\[[0-9;]*m", "", h)
                 content_width = w - pad_x * 2
                 text_width = wcswidth(plain_h)
-                left_pad = (content_width - text_width) // 2
-                right_pad = content_width - text_width - left_pad
+                
+                if col_def.justify == "right":
+                    left_pad = content_width - text_width
+                    right_pad = 0
+                elif col_def.justify == "center":
+                    left_pad = (content_width - text_width) // 2
+                    right_pad = content_width - text_width - left_pad
+                else: # left
+                    left_pad = 0
+                    right_pad = content_width - text_width
+
                 cell_content = f"{' ' * pad_x}{' ' * left_pad}{h}{' ' * right_pad}{' ' * pad_x}"
-                parts.append(f"{header_ansi}{cell_content}{reset}{border_ansi}")
-                parts.append(chars["vertical"])
-            yield f"{border_ansi}{''.join(parts)}{reset}"
+                parts.append(f"{header_ansi}{cell_content}{reset}{border_ansi if chars else ''}")
+                if chars:
+                    parts.append(chars["vertical"])
+                elif i < col_count - 1:
+                    parts.append(" " * pad_x) # Space between columns if no box
+            yield f"{border_ansi if chars else ''}{''.join(parts)}{reset}"
             
             # Header separator
-            parts = [chars["left_t"]]
-            for i, w in enumerate(col_widths):
-                parts.append(chars["horizontal"] * w)
-                if i < col_count - 1:
-                    parts.append(chars["cross"])
-                else:
-                    parts.append(chars["right_t"])
-            yield f"{border_ansi}{''.join(parts)}{reset}"
+            if chars:
+                parts = [chars["left_t"]]
+                for i, w in enumerate(col_widths):
+                    parts.append(chars["horizontal"] * w)
+                    if i < col_count - 1:
+                        parts.append(chars["cross"])
+                    else:
+                        parts.append(chars["right_t"])
+                yield f"{border_ansi}{''.join(parts)}{reset}"
         
         # Data rows
         for row_idx, row in enumerate(processed_rows):
@@ -183,25 +226,43 @@ class Table(Renderable):
                     row_style = Style.parse(row_style)
             row_ansi = str(row_style) if row_style else ""
             
-            parts = [chars["vertical"]]
+            parts = [chars["vertical"]] if chars else []
             for i in range(col_count):
                 w = col_widths[i]
+                col_def = self.columns[i]
+                col_ansi = str(col_def.style) if col_def.style else ""
+                
                 cell = row[i] if i < len(row) else ""
                 plain_cell = re.sub(r"\x1b\[[0-9;]*m", "", cell)
                 content_width = w - pad_x * 2
                 text_width = wcswidth(plain_cell)
-                left_pad = (content_width - text_width) // 2
-                right_pad = content_width - text_width - left_pad
                 
-                if row_ansi:
+                if col_def.justify == "right":
+                    left_pad = content_width - text_width
+                    right_pad = 0
+                elif col_def.justify == "center":
+                    left_pad = (content_width - text_width) // 2
+                    right_pad = content_width - text_width - left_pad
+                else: # left
+                    left_pad = 0
+                    right_pad = content_width - text_width
+                
+                # Combine row and column styles
+                combined_style = f"{row_ansi}{col_ansi}"
+                
+                if combined_style:
                     cell_content = f"{' ' * pad_x}{' ' * left_pad}{cell}{reset}{' ' * right_pad}{' ' * pad_x}"
-                    parts.append(f"{row_ansi}{cell_content}{border_ansi}")
+                    parts.append(f"{combined_style}{cell_content}{border_ansi if chars else ''}")
                 else:
                     cell_content = f"{' ' * pad_x}{' ' * left_pad}{cell}{' ' * right_pad}{' ' * pad_x}"
-                    parts.append(f"{cell_content}{border_ansi}")
-                parts.append(chars["vertical"])
+                    parts.append(f"{cell_content}{border_ansi if chars else ''}")
+                
+                if chars:
+                    parts.append(chars["vertical"])
+                elif i < col_count - 1:
+                    parts.append(" " * pad_x)
             
-            yield f"{border_ansi}{''.join(parts)}{reset}"
+            yield f"{border_ansi if chars else ''}{''.join(parts)}{reset}"
             
             # Row separator
             if self.show_lines and row_idx < len(processed_rows) - 1:
@@ -215,7 +276,7 @@ class Table(Renderable):
                 yield f"{border_ansi}{''.join(parts)}{reset}"
         
         # Bottom border
-        if self.show_edge:
+        if self.show_edge and chars:
             parts = [chars["bottom_left"]]
             for i, w in enumerate(col_widths):
                 parts.append(chars["horizontal"] * w)

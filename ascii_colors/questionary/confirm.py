@@ -17,7 +17,7 @@ class Confirm(Question):
         self.auto_enter = kwargs.get('auto_enter', True)
     
     def _ask_internal(self) -> bool:
-        color = self.style.get('question', ANSI.color_bright_yellow)
+        color = self._get_style('question', ANSI.color_bright_yellow)
         suffix = "[Y/n]" if self.default else "[y/N]"
         
         while True:

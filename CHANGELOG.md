@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - chore(release): bump version to 0.11.6 and update .gitignore
 
+## [2026-03-07 21:55]
+
+- refactor(questionary): standardize PromptText naming and enhance autocomplete
+
 ## [2026-03-01 15:01]
 
 - feat: expose context management methods at module level

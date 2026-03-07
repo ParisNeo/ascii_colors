@@ -353,14 +353,28 @@ class ASCIIColors(ANSI):
             file: Output stream
             markup: Whether to parse rich markup tags in the prompt text
         """
-        # Process prompt for markup if enabled
-        processed_text = ASCIIColors._apply_rich_markup(text) if markup else text
-        
-        full = f"{style}{color}{processed_text}{ANSI.color_reset}"
+        if markup:
+            from ascii_colors.rich import Console
+            console = Console(file=file)
+            
+            prompt_text = text
+            if style or color:
+                processed_text = ASCIIColors._apply_rich_markup(text)
+                prompt_text = f"{style}{color}{processed_text}{ANSI.color_reset}"
+                return console.input(prompt_text, markup=False, password=hide_input)
+            
+            return console.input(text, markup=True, password=hide_input)
+
+        # Fallback for no markup
+        full = f"{style}{color}{text}{ANSI.color_reset}"
         try:
-            print(full, end="", flush=True, file=file)
+            file.write(full)
+            file.flush()
             return getpass.getpass(prompt="") if hide_input else input()
-        except KeyboardInterrupt: print(file=file); return ""
+        except KeyboardInterrupt: 
+            file.write("\n")
+            file.flush()
+            return ""
 
     # ============== Rich-style markup printing ==============
 

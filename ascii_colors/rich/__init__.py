@@ -7,10 +7,10 @@ for terminal rendering without external dependencies.
 This module is organized into submodules for better maintainability.
 """
 
-from ascii_colors.rich.console import Console, ConsoleOptions, Measurement
+from ascii_colors.rich.console import Console, ConsoleOptions, Measurement, Prompt, Confirm
 from ascii_colors.rich.style import Style, Color, BoxStyle
 from ascii_colors.rich.text import Text, Renderable
-from ascii_colors.rich.layout import Panel, Padding, Columns
+from ascii_colors.rich.layout import Panel, Padding, Columns, Rule
 from ascii_colors.rich.table import Table
 from ascii_colors.rich.tree import Tree
 from ascii_colors.rich.content import Syntax, Markdown
@@ -75,6 +75,22 @@ class RichModule:
         """Print a rule to the default console."""
         self._console.rule(title, characters=characters, style=style, align=align)
     
+    def prompt(
+        self,
+        prompt="",
+        *,
+        markup=True,
+        emoji=True,
+        password=False,
+    ):
+        """Get input from the user with a rich prompt."""
+        return self._console.input(
+            prompt, 
+            markup=markup, 
+            emoji=emoji, 
+            password=password
+        )
+
     def status(
         self,
         status,
@@ -124,6 +140,9 @@ class RichModule:
     Renderable = Renderable
     ConsoleOptions = ConsoleOptions
     Measurement = Measurement
+    Rule = Rule
+    Prompt = Prompt
+    Confirm = Confirm
 
 
 # Create module instance
@@ -142,18 +161,22 @@ def rule(title="", **kwargs):
     """Print a rule using the rich module."""
     rich.rule(title, **kwargs)
 
+def prompt(prompt_text="", **kwargs):
+    """Get input using the rich module."""
+    return rich.prompt(prompt_text, **kwargs)
+
 
 # Re-export all public classes for direct import
 __all__ = [
     # Core
     "rich", "print", "log", "rule",
-    "Console", "ConsoleOptions", "Measurement",
+    "Console", "ConsoleOptions", "Measurement", "Prompt", "Confirm",
     # Style
     "Style", "Color", "BoxStyle", "Renderable",
     # Text and Content
     "Text",
     # Layout
-    "Panel", "Padding", "Columns",
+    "Panel", "Padding", "Columns", "Rule",
     # Data Display
     "Table", "Tree",
     # Content

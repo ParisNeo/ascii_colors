@@ -39,20 +39,28 @@ class Checkbox(Question):
                             c['checked'] = True
                             break
     
-    def _normalize_choices(self, choices: List[Union[str, Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    def _normalize_choices(self, choices: List[Union[str, Dict[str, Any], Any]]) -> List[Dict[str, Any]]:
         """Normalize choice list with checked state."""
         result = []
         for i, c in enumerate(choices):
-            if isinstance(c, str):
+            if hasattr(c, '__class__') and c.__class__.__name__ == 'Separator':
+                result.append({
+                    'name': str(c), 'value': None, 'disabled': True, 'checked': False
+                })
+            elif isinstance(c, str):
                 result.append({
                     'name': c, 'value': c, 'disabled': False, 'checked': False
                 })
-            else:
+            elif isinstance(c, dict):
                 result.append({
                     'name': c.get('name', c.get('value', str(i))),
                     'value': c.get('value', c.get('name', str(i))),
                     'disabled': c.get('disabled', False),
                     'checked': c.get('checked', False),
+                })
+            else:
+                result.append({
+                    'name': str(c), 'value': str(c), 'disabled': False, 'checked': False
                 })
         return result
     

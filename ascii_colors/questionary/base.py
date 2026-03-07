@@ -4,7 +4,7 @@ Base classes for questionary-compatible interactive prompts.
 """
 
 import sys
-from typing import Any, Callable, Dict, Iterator, Optional, Union
+from typing import Any, Callable, Dict, Iterator, Optional, Union, List, Tuple
 from ascii_colors.constants import ANSI
 from ascii_colors.core import ASCIIColors
 from ascii_colors.utils import _get_key
@@ -17,11 +17,37 @@ class ValidationError(Exception):
         super().__init__(self.message)
 
 
+class Style:
+    """Style mapping for questionary compatibility."""
+    def __init__(self, mapping: List[Tuple[str, str]]):
+        self.mapping = dict(mapping)
+    
+    def get(self, key: str, default: str = "") -> str:
+        return self.mapping.get(key, default)
+
+
+class Separator:
+    """Separator for choice lists."""
+    def __init__(self, line: str = "-" * 15):
+        self.line = line
+    
+    def __str__(self) -> str:
+        return self.line
+
+
 class Validator:
     """Base class for input validators."""
     def __init__(self, message: str = "invalid input"):
         self.message = message
     
+    @classmethod
+    def from_callable(cls, func: Callable[[str], bool], message: str = "invalid input"):
+        class _FuncValidator(cls):
+            def validate(self, document):
+                if not func(document):
+                    raise ValidationError(message)
+        return _FuncValidator(message)
+
     def validate(self, document: str) -> None:
         """Validate the input. Raise ValidationError if invalid."""
         raise NotImplementedError
@@ -38,7 +64,7 @@ class Question:
     """Base class for all question types."""
     def __init__(self, message: str, default: Any = None, 
                  validate: Optional[Union[Callable[[str], bool], Validator]] = None,
-                 style: Optional[Dict[str, str]] = None, **kwargs):
+                 style: Optional[Union[Dict[str, str], Style, Any]] = None, **kwargs):
         self.message = message
         self.default = default
         self.validate = validate
@@ -91,6 +117,16 @@ class Question:
                 return 'QUIT'
         return _get_key()
     
+    def _get_style(self, key: str, default: str) -> str:
+        """Safely get a style value."""
+        if hasattr(self.style, 'get'):
+            try:
+                val = self.style.get(key, default)
+                return str(val) if val is not None else default
+            except (AttributeError, TypeError):
+                return default
+        return default
+
     def _validate_input(self, value: str) -> bool:
         """Run validation on input."""
         if self.validate is None:

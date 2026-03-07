@@ -87,6 +87,70 @@ class Measurement:
         return Measurement(min(self.minimum, self.maximum), max(self.minimum, self.maximum))
 
 
+class Prompt:
+    """Interactive prompt for user input."""
+
+    @staticmethod
+    def ask(
+        prompt: str = "",
+        *,
+        console: Optional["Console"] = None,
+        default: Any = None,
+        password: bool = False,
+        choices: Optional[List[str]] = None,
+        show_default: bool = True,
+        show_choices: bool = True,
+        markup: bool = True,
+    ) -> Any:
+        """Shortcut to ask for input."""
+        c = console or Console()
+        
+        prompt_text = prompt
+        if choices and show_choices:
+            prompt_text += f" [[bold cyan]{'/'.join(choices)}[/bold cyan]]"
+        if default is not None and show_default:
+            prompt_text += f" ([dim]{default}[/dim])"
+        prompt_text += ": "
+
+        while True:
+            response = c.input(prompt_text, markup=markup, password=password)
+            if not response and default is not None:
+                return default
+            if choices and response not in choices:
+                c.print(f"[red]Please choose from: {', '.join(choices)}[/red]")
+                continue
+            return response
+
+
+class Confirm(Prompt):
+    """Interactive confirmation prompt."""
+
+    @staticmethod
+    def ask(
+        prompt: str = "",
+        *,
+        console: Optional["Console"] = None,
+        default: bool = True,
+        markup: bool = True,
+    ) -> bool:
+        """Shortcut to ask for confirmation."""
+        c = console or Console()
+        suffix = "[Y/n]" if default else "[y/N]"
+        
+        # Build prompt string
+        prompt_text = f"{prompt} {suffix}"
+
+        while True:
+            response = c.input(prompt_text, markup=markup).lower().strip()
+            if not response:
+                return default
+            if response in ("y", "yes"):
+                return True
+            if response in ("n", "no"):
+                return False
+            c.print("[red]Please enter 'y' or 'n'[/red]")
+
+
 class Console:
     """Console for rich text output."""
     

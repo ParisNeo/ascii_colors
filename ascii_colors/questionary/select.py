@@ -19,18 +19,22 @@ class Select(Question):
         self.use_indicator = kwargs.get('use_indicator', True)
         self.use_shortcuts = kwargs.get('use_shortcuts', False)
     
-    def _normalize_choices(self, choices: List[Union[str, Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    def _normalize_choices(self, choices: List[Union[str, Dict[str, Any], Any]]) -> List[Dict[str, Any]]:
         """Normalize choice list to standard format."""
         result = []
         for i, c in enumerate(choices):
-            if isinstance(c, str):
+            if hasattr(c, '__class__') and c.__class__.__name__ == 'Separator':
+                result.append({'name': str(c), 'value': None, 'disabled': True})
+            elif isinstance(c, str):
                 result.append({'name': c, 'value': c, 'disabled': False})
-            else:
+            elif isinstance(c, dict):
                 result.append({
                     'name': c.get('name', c.get('value', str(i))),
                     'value': c.get('value', c.get('name', str(i))),
                     'disabled': c.get('disabled', False),
                 })
+            else:
+                result.append({'name': str(c), 'value': str(c), 'disabled': False})
         return result
     
     def _ask_internal(self) -> Any:
