@@ -455,7 +455,9 @@ class Console:
             try:
                 for segment in renderable.__rich_console__(self, options):
                     if isinstance(segment, str):
-                        lines.append(segment)
+                        # Apply markup to strings yielded by __rich_console__
+                        markup_rendered = self._apply_markup(segment)
+                        lines.extend(markup_rendered.split("\n"))
                     elif isinstance(segment, Text):
                         sub_lines = segment.wrap(options.max_width)
                         lines.extend([line.render(options.max_width) for line in sub_lines])
@@ -486,6 +488,7 @@ class Console:
         width=None,
         crop=True,
         soft_wrap=False,
+        flush=False,
     ):
         """Print objects to the console."""
         use_emoji = emoji if emoji is not None else self.emoji
@@ -570,7 +573,7 @@ class Console:
                         if self.record:
                             self._record_buffer.append(line + "\n")
                 except Exception as e:
-                    _builtin_print(f"[Error: {e}] {str(obj)}", file=self.file)
+                    _builtin_print(f"[Error rendering {obj_type}: {e}] {str(obj)}", file=self.file)
                     
             else:
                 output = str(obj)
@@ -578,7 +581,7 @@ class Console:
                 if self.record:
                     self._record_buffer.append(output)
         
-        _builtin_print(end, end="", file=self.file)
+        _builtin_print(end, end="", file=self.file, flush=flush)
         if self.record:
             self._record_buffer.append(end)
     

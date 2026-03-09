@@ -4,7 +4,7 @@ Content components: Syntax and Markdown for rich compatibility.
 """
 
 import re
-from typing import Dict, Iterator, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Dict, Iterator, List, Optional, Tuple, TYPE_CHECKING, Union, Any
 
 if TYPE_CHECKING:
     from ascii_colors.rich.console import Console, ConsoleOptions
@@ -196,15 +196,22 @@ class Markdown(Renderable):
         self.style = style
         self.hyperlinks = hyperlinks
     
-    def _parse_markdown(self) -> List[Tuple[str, str, int]]:
+    def _parse_markdown(self) -> List[Tuple[str, Any, int]]:
         lines = self.markup.split("\n")
         result = []
         
         in_code = False
         code_lang = ""
         code_content = []
+        in_table = False
+        table_headers = []
+        table_rows = []
         
-        for line in lines:
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            
+            # Code blocks
             if line.strip().startswith("```"):
                 if in_code:
                     result.append(("code", "\n".join(code_content), code_lang))
@@ -213,32 +220,76 @@ class Markdown(Renderable):
                 else:
                     code_lang = line.strip()[3:].strip()
                     in_code = True
+                i += 1
                 continue
             
             if in_code:
                 code_content.append(line)
+                i += 1
                 continue
             
+            # Tables: check for |...| pattern
+            if "|" in line and not in_table:
+                # Check if this looks like a table header
+                potential_headers = [c.strip() for c in line.split("|") if c.strip()]
+                if potential_headers:
+                    # Look ahead for separator line
+                    if i + 1 < len(lines) and re.match(r"^\s*\|?[\s\-:|]+\|?\s*$", lines[i + 1]):
+                        in_table = True
+                        table_headers = potential_headers
+                        table_rows = []
+                        i += 2  # Skip header and separator
+                        continue
+            
+            if in_table:
+                # Check if line is part of table
+                if "|" in line and line.strip():
+                    cells = [c.strip() for c in line.split("|") if c.strip()]
+                    if cells:
+                        table_rows.append(cells)
+                    i += 1
+                    continue
+                else:
+                    # End of table
+                    result.append(("table", {"headers": table_headers, "rows": table_rows}, 0))
+                    in_table = False
+                    table_headers = []
+                    table_rows = []
+                    continue
+            
+            # Headers
             header_match = re.match(r"^(#{1,6})\s+(.+)$", line)
             if header_match:
                 level = len(header_match.group(1))
                 result.append(("header", header_match.group(2), level))
+                i += 1
                 continue
             
+            # Blockquotes
             if line.startswith(">"):
                 result.append(("quote", line[1:].strip(), 0))
+                i += 1
                 continue
             
+            # Lists
             list_match = re.match(r"^([\*\-\+]|\d+\.)\s+(.+)$", line)
             if list_match:
                 result.append(("list", list_match.group(2), 0))
+                i += 1
                 continue
             
+            # Empty lines
             if not line.strip():
-                result.append(("empty", "", 0))
+                i += 1
                 continue
             
+            # Paragraphs
             result.append(("para", line, 0))
+            i += 1
+        
+        # Handle unclosed table at end
+        if in_table:
+            result.append(("table", {"headers": table_headers, "rows": table_rows}, 0))
         
         return result
     
@@ -248,6 +299,8 @@ class Markdown(Renderable):
         options: "ConsoleOptions",
     ) -> Iterator[Union[str, Renderable]]:
         elements = self._parse_markdown()
+        
+        prev_was_para = False
         
         for elem_type, content, level in elements:
             if elem_type == "header":
@@ -265,28 +318,58 @@ class Markdown(Renderable):
                 yield f"{style}{content}{ANSI.color_reset}"
                 if underline:
                     yield f"{style}{underline}{ANSI.color_reset}"
-                yield ""
+                prev_was_para = False
             
             elif elem_type == "para":
-                yield content
-                yield ""
+                # Process inline formatting
+                para = self._process_inline(content)
+                yield para
+                prev_was_para = True
             
             elif elem_type == "list":
-                yield f"  • {content}"
+                yield f"  • {self._process_inline(content)}"
+                prev_was_para = False
             
             elif elem_type == "quote":
                 yield f"{ANSI.style_dim}│ {content}{ANSI.color_reset}"
+                prev_was_para = False
             
             elif elem_type == "code":
                 from ascii_colors.rich.content import Syntax
                 syntax = Syntax(content, lexer=content if content else "text", line_numbers=False)
                 for line in console.render(syntax, options):
                     yield line
-                yield ""
+                prev_was_para = False
             
-            elif elem_type == "empty":
-                yield ""
+            elif elem_type == "table":
+                from ascii_colors.rich.table import Table
+                table_data = content
+                table = Table(
+                    *table_data["headers"],
+                    box="square",
+                    show_lines=False,
+                    padding=(0, 1),
+                )
+                for row in table_data["rows"]:
+                    # Ensure row has same number of cells as headers
+                    while len(row) < len(table_data["headers"]):
+                        row.append("")
+                    table.add_row(*row)
+                yield table
+                prev_was_para = False
     
+    def _process_inline(self, text: str) -> str:
+        """Process inline markdown formatting."""
+        # Bold: **text** or __text__
+        text = re.sub(r"\*\*(.+?)\*\*", r"[bold]\1[/bold]", text)
+        text = re.sub(r"__(.+?)__", r"[bold]\1[/bold]", text)
+        # Italic: *text* or _text_
+        text = re.sub(r"\*(.+?)\*", r"[italic]\1[/italic]", text)
+        text = re.sub(r"(?<!\w)_(.+?)_(?!\w)", r"[italic]\1[/italic]", text)
+        # Code: `text`
+        text = re.sub(r"`(.+?)`", r"[dim]\1[/dim]", text)
+        return text
+
     def __rich_measure__(
         self,
         console: "Console",
