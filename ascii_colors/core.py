@@ -187,6 +187,8 @@ class ASCIIColors(ANSI):
     @staticmethod
     def bold(t: str, **k): return ASCIIColors.print(t, style=ANSI.style_bold, **k)
     @staticmethod
+    def dim(t: str, **k): return ASCIIColors.print(t, style=ANSI.style_dim, **k)
+    @staticmethod
     def italic(t: str, **k): return ASCIIColors.print(t, style=ANSI.style_italic, **k)
 
     @staticmethod
