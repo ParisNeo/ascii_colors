@@ -40,6 +40,7 @@ class ANSI:
     color_cyan: str = "\u001b[36m"
     color_white: str = "\u001b[37m"
     color_orange: str = "\u001b[38;5;208m"
+    color_purple: str = "\u001b[38;5;93m"
 
     color_bright_black: str = "\u001b[90m"
     color_bright_red: str = "\u001b[91m"
@@ -59,6 +60,7 @@ class ANSI:
     color_bg_cyan: str = "\u001b[46m"
     color_bg_white: str = "\u001b[47m"
     color_bg_orange: str = "\u001b[48;5;208m"
+    color_bg_purple: str = "\u001b[48;5;93m"
 
     color_bg_bright_black: str = "\u001b[100m"
     color_bg_bright_red: str = "\u001b[101m"

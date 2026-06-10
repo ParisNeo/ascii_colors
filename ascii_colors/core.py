@@ -179,6 +179,8 @@ class ASCIIColors(ANSI):
     @staticmethod
     def magenta(t: str, **k): return ASCIIColors.print(t, ANSI.color_magenta, **k)
     @staticmethod
+    def purple(t: str, **k): return ASCIIColors.print(t, ANSI.color_purple, **k)
+    @staticmethod
     def cyan(t: str, **k): return ASCIIColors.print(t, ANSI.color_cyan, **k)
     @staticmethod
     def white(t: str, **k): return ASCIIColors.print(t, ANSI.color_white, **k)
