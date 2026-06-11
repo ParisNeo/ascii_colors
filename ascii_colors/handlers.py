@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
 from threading import Lock
-from typing import Any, Optional, Tuple, Type, Union, IO, TextIO
+from typing import Any, Dict, Optional, Tuple, Type, Union, IO, TextIO
 from ascii_colors.constants import LogLevel, DEBUG
 from ascii_colors.formatters import Formatter
 
@@ -131,7 +131,106 @@ class RotatingFileHandler(FileHandler):
         elif self.filename.exists(): self.filename.unlink()
         self._open_file()
 
+class FolderRouterHandler(Handler):
+    """Routes log records to separate files in a folder based on logger name.
+
+    Creates one log file per logger name. Supports three modes:
+    - rolling: RotatingFileHandler with size-based rotation
+    - overwrite: Single file per logger, overwritten each run
+    - timestamp: File per run with timestamp in filename
+    """
+
+    def __init__(self, folder_path: Union[str, Path], mode: str = 'rolling',
+                 maxBytes: int = 0, backupCount: int = 0,
+                 encoding: Optional[str] = "utf-8",
+                 level: Union[LogLevel, int] = DEBUG,
+                 formatter: Optional[Formatter] = None):
+        super().__init__(level, formatter)
+        self.folder_path = Path(folder_path).resolve()
+        self.mode = mode.lower()
+        if self.mode not in ('rolling', 'overwrite', 'timestamp'):
+            raise ValueError("mode must be 'rolling', 'overwrite', or 'timestamp'")
+        self.maxBytes = maxBytes
+        self.backupCount = backupCount
+        self.encoding = encoding
+        self._file_handlers: Dict[str, Handler] = {}
+        self._run_timestamp: str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self._folder_lock = Lock()
+
+        # Ensure folder exists
+        self.folder_path.mkdir(parents=True, exist_ok=True)
+
+    def handle(self, level: LogLevel, message: str, timestamp: datetime,
+               exc_info: Optional[Tuple], logger_name: str = 'root', **kwargs: Any) -> None:
+        if self.closed or level < self.level:
+            return
+
+        # Sanitize logger name for use in filename
+        safe_name = "".join(c if c.isalnum() or c in ('_', '-') else '_' for c in logger_name)
+
+        if self.mode == 'timestamp':
+            filename = f"{safe_name}_{self._run_timestamp}.log"
+            file_mode = 'a'
+        elif self.mode == 'overwrite':
+            filename = f"{safe_name}.log"
+            file_mode = 'w'
+        else:  # rolling
+            filename = f"{safe_name}.log"
+            file_mode = 'a'
+
+        filepath = self.folder_path / filename
+
+        with self._folder_lock:
+            handler = self._file_handlers.get(logger_name)
+
+            if handler is None or handler.closed:
+                if self.mode == 'rolling':
+                    handler = RotatingFileHandler(
+                        filepath, mode=file_mode, maxBytes=self.maxBytes,
+                        backupCount=self.backupCount, encoding=self.encoding,
+                        level=self.level, formatter=self.formatter
+                    )
+                else:
+                    handler = FileHandler(
+                        filepath, mode=file_mode, encoding=self.encoding,
+                        level=self.level, formatter=self.formatter
+                    )
+                self._file_handlers[logger_name] = handler
+
+            # Format and emit
+            fmt = self.formatter or Formatter()
+            formatted = fmt.format(level, message, timestamp, exc_info, logger_name=logger_name, **kwargs)
+            try:
+                handler.emit(level, formatted)
+            except Exception:
+                self.handle_error("Error during emit")
+
+    def close(self) -> None:
+        if self.closed:
+            return
+        with self._folder_lock:
+            for hdlr in self._file_handlers.values():
+                try:
+                    hdlr.close()
+                except Exception:
+                    pass
+            self._file_handlers.clear()
+        super().close()
+
+    def flush(self) -> None:
+        with self._folder_lock:
+            for hdlr in self._file_handlers.values():
+                try:
+                    hdlr.flush()
+                except Exception:
+                    pass
+
+    def emit(self, level: LogLevel, formatted_message: str) -> None:
+        raise NotImplementedError("FolderRouterHandler routes via handle(), not emit() directly")
+
+
 class handlers:
     RotatingFileHandler = RotatingFileHandler
     FileHandler = FileHandler
     StreamHandler = StreamHandler
+    FolderRouterHandler = FolderRouterHandler

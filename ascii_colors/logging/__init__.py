@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional, Union, Callable, Tuple, Iterator
 
 from ascii_colors.constants import LogLevel, DEBUG, INFO, WARNING, ERROR, CRITICAL, NOTSET
 from ascii_colors.core import ASCIIColors
-from ascii_colors.handlers import Handler, ConsoleHandler, FileHandler, RotatingFileHandler, StreamHandler
+from ascii_colors.handlers import Handler, ConsoleHandler, FileHandler, RotatingFileHandler, StreamHandler, FolderRouterHandler
 from ascii_colors.formatters import Formatter, JSONFormatter
 
 # Expose context methods for compatibility
@@ -212,11 +212,28 @@ def basicConfig(
     stream: Optional[io.TextIOWrapper] = None,
     handlers: Optional[List[Handler]] = None,
     force: bool = False,
+    log_folder: Optional[str] = None,
+    log_folder_mode: str = 'rolling',
+    log_folder_maxBytes: int = 0,
+    log_folder_backupCount: int = 0,
+    file_maxBytes: int = 0,
+    file_backupCount: int = 0,
 ) -> None:
     """
     Configure basic logging.
-    
+
     Mirrors logging.basicConfig() for drop-in compatibility.
+
+    Folder routing:
+        log_folder: Directory path to store routed log files.
+        log_folder_mode: 'rolling', 'overwrite', or 'timestamp'.
+        log_folder_maxBytes: Max size per file before rotation (rolling mode).
+        log_folder_backupCount: Number of backups to keep (rolling mode).
+
+    File rotation:
+        file_maxBytes: Max size in bytes before rotating when using
+            `filename` (0 disables rotation, uses plain FileHandler).
+        file_backupCount: Number of backup files to keep when rotating.
     """
     # Check if already configured (thread-safe)
     with ASCIIColors._handler_lock:
@@ -249,13 +266,31 @@ def basicConfig(
             if hdlr.formatter is None:
                 hdlr.setFormatter(formatter)
             ASCIIColors.add_handler(hdlr)
+    elif log_folder:
+        hdlr = FolderRouterHandler(
+            log_folder,
+            mode=log_folder_mode,
+            maxBytes=log_folder_maxBytes,
+            backupCount=log_folder_backupCount,
+            level=level or DEBUG,
+        )
+        hdlr.setFormatter(formatter)
+        ASCIIColors.add_handler(hdlr)
     else:
-        # Create default console handler
+        # Create default console or rotating file handler
         if filename:
-            hdlr = FileHandler(filename, mode=filemode)
+            if file_maxBytes > 0:
+                hdlr = RotatingFileHandler(
+                    filename,
+                    mode=filemode,
+                    maxBytes=file_maxBytes,
+                    backupCount=file_backupCount,
+                )
+            else:
+                hdlr = FileHandler(filename, mode=filemode)
         else:
             hdlr = ConsoleHandler(stream=stream or sys.stderr)
-        
+
         hdlr.setFormatter(formatter)
         ASCIIColors.add_handler(hdlr)
     

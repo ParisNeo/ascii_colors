@@ -12,7 +12,7 @@ Stop wrestling with multiple CLI libraries. **ASCIIColors** unifies everything y
 
 | 🎨 **Colors & Styles** | 🪵 **Logging System** | 📊 **Progress Bars** |
 |:---|:---|:---|
-| 256-color support, bright variants, backgrounds, bold/italic/underline/blink | Full `logging` compatibility with handlers, formatters, JSON output, rotation | `tqdm`-like bars with custom styles (fill, blocks, line, emoji), thread-safe |
+| 256-color support, bright variants, backgrounds, bold/italic/underline/blink | Full `logging` compatibility, **per-logger file routing for AI debugging**, JSON output, rotation, contextual logging | `tqdm`-like bars with custom styles (fill, blocks, line, emoji), thread-safe |
 
 | 🖥️ **Rich Components** | ❓ **Smart Prompts** | 🛠️ **Utilities** |
 |:---|:---|:---|
@@ -777,6 +777,208 @@ with ASCIIColors.context(
 
 # After block: context automatically removed
 logger.info("Cleanup")  # Without request context
+```
+
+#### 📜 File Rotation with `basicConfig`
+
+For long-running services that need size-based log rotation, `basicConfig` now exposes `maxBytes` and `backupCount` directly — no need to wire up a `RotatingFileHandler` manually:
+
+```python
+import ascii_colors as logging
+
+logging.basicConfig(
+    filename="app.log",
+    filemode="a",
+    format="%(asctime)s [%(levelname)-8s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    file_maxBytes=10_000_000,   # Rotate when file reaches 10 MB
+    file_backupCount=5,         # Keep 5 backup files
+)
+
+logger = logging.getLogger("MyService")
+logger.info("This goes to app.log")
+```
+
+When `app.log` reaches 10 MB the file is rotated automatically:
+
+```
+app.log     ← current file (newly created)
+app.log.1   ← previous run
+app.log.2
+app.log.3
+app.log.4
+app.log.5   ← oldest, deleted on next rotation
+```
+
+| Parameter | Default | Description |
+|:---|:---|:---|
+| `file_maxBytes` | `0` (no rotation) | Max size in bytes before rotating. Set to a positive value to enable rolling behavior. |
+| `file_backupCount` | `0` | Number of backup files to keep. When `0`, the oldest file is deleted on each rotation. |
+
+Setting `file_maxBytes=0` (the default) preserves the previous behavior of a plain append-only `FileHandler`. If you need time-based rotation, custom naming, or per-logger file routing, use `RotatingFileHandler` or `FolderRouterHandler` directly.
+
+#### 🔍 Per-Logger File Routing — Built for LoLLMs VSCoder
+
+When debugging complex applications with multiple components, scrolling through a single monolithic log file is painful and slow. **ASCII Colors** solves this with the `FolderRouterHandler`, which automatically routes each logger's output to its own dedicated file based on the logger's name.
+
+**Why this is a game-changer for VSCoder AI agents:** When using the [LoLLMs VSCoder](https://github.com/ParisNeo/lollms-vscoder) extension, you can simply add the relevant log file(s) to your AI's context. The agent sees *only* the output from the module you're debugging — no noise, no scrolling, no confusion. Just focused, isolated diagnostics that lead to faster, more accurate fixes.
+
+```python
+import ascii_colors as logging
+
+# Configure once at startup: route each logger to its own file
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s [%(levelname)-8s] %(message)s',
+    log_folder="./logs",              # Output directory
+    log_folder_mode="timestamp",      # New file per run (or "rolling" / "overwrite")
+)
+
+# Use named loggers throughout your codebase
+auth_logger = logging.getLogger("auth")
+db_logger = logging.getLogger("database")
+api_logger = logging.getLogger("api")
+
+auth_logger.info("User logged in")
+db_logger.error("Connection pool exhausted")
+api_logger.debug("Request received: /users/42")
+```
+
+**What gets created automatically:**
+
+```
+logs/
+├── auth_20251006_184523.log
+├── database_20251006_184523.log
+└── api_20251006_184523.log
+```
+
+**The VSCoder workflow:**
+
+1. An error occurs in your `database` module
+2. Open VSCoder and start a chat
+3. Click **Add Files to Context** and select `logs/database_20251006_184523.log`
+4. Ask: *"Why is my database connection failing?"*
+5. The AI sees the exact log file and provides a focused diagnosis — without wading through every other module's output
+
+**Three routing modes for every workflow:**
+
+| Mode | Behavior | Best For |
+|:---|:---|:---|
+| `rolling` | Rotates by size, keeps N backups | Long-running production services |
+| `overwrite` | Single file per logger, truncated each run | Quick dev iteration, fresh start every run |
+| `timestamp` | New file per run with timestamp in name | Preserving history, debugging specific runs |
+
+**Manual setup (for fine-grained control):**
+
+```python
+from ascii_colors import ASCIIColors, FolderRouterHandler, Formatter
+import ascii_colors as logging
+
+handler = FolderRouterHandler(
+    folder_path="./project_logs",
+    mode="rolling",
+    maxBytes=10_000_000,      # 10MB per file before rotation
+    backupCount=5,            # Keep 5 backup files
+    level=logging.DEBUG,
+)
+handler.setFormatter(Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+ASCIIColors.add_handler(handler)
+```
+
+**Pro tip:** Use descriptive, hierarchical logger names like `"app.auth.oauth"`, `"app.db.postgres"`, or `"app.api.v2.users"`. They're automatically sanitized into valid filenames (slashes and special characters become underscores), and you can correlate them directly with your module structure for instant context isolation when debugging.
+
+---
+
+### 🏗️ Multi-Module Project Best Practices
+
+ASCII Colors is designed to make multi-module logging trivially clean. Follow this canonical pattern in your application:
+
+#### The "configure-first" pattern
+
+```python
+# main.py — the entry point of your application
+import ascii_colors as logging
+
+# 1. Configure logging ONCE, at the top of your entry point
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)-8s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    log_folder="./logs",                # Per-module file routing
+    log_folder_mode="rolling",
+    log_folder_maxBytes=10_000_000,
+    log_folder_backupCount=5,
+    force=True,                         # Safe in entry points: deterministic
+)
+
+# 2. NOW import your application modules
+from myapp import auth, api, database
+
+# 3. Run
+auth.start()
+api.serve()
+```
+
+In every other file of your project, this is **all you need**:
+
+```python
+# myapp/auth.py
+import ascii_colors as logging
+logger = logging.getLogger(__name__)   # → "myapp.auth"
+
+def login(user, pwd):
+    logger.info("Login attempt: %s", user)
+    # → automatically routed to logs/myapp.auth.log
+```
+
+#### Why this works
+
+| Concern | How it's handled |
+|:---|:---|
+| Logger created *before* `basicConfig`? | Falls back to a default console handler; picks up the configured handlers on the next emit. No crash. |
+| Multiple files share the same config? | All read from the global `ASCIIColors._handlers` list — zero duplication. |
+| Memory cost per module? | Negligible: loggers are cached by name in `_logger_cache`. |
+| Re-importing the same module? | Same cached adapter, no handler leaks. |
+| Per-logger file routing? | `__name__` becomes the filename stem → VSCoder-friendly isolation. |
+
+#### Key rules
+
+1. **Configure once, at the top of `main.py` (or your entry point).**
+2. **Configure *before* importing your own modules** — this captures any import-time log messages cleanly.
+3. **Use `force=True` at the entry point, `force=False` inside libraries** to avoid clobbering host applications.
+4. **Every other file just does `logger = logging.getLogger(__name__)`** — never call `basicConfig` from a library module.
+5. **Never hardcode a `filename=` per-module** — let `FolderRouterHandler` route by name.
+
+#### Decision matrix: which configuration to use
+
+| Scenario | Configuration |
+|:---|:---|
+| One log file for the whole app | `filename="app.log"` + `file_maxBytes` + `file_backupCount` |
+| One file per module (VSCoder debugging) | `log_folder="./logs"` + `log_folder_mode` |
+| Both (file + folder fallback) | Use a `handlers=[...]` list in `basicConfig` |
+| Library code | Only `getLogger(__name__)` — never `basicConfig` |
+
+#### Testing
+
+Configure logging once in `conftest.py` to a temp directory — every test then gets automatic per-logger isolation:
+
+```python
+# tests/conftest.py
+import tempfile
+import ascii_colors as logging
+import pytest
+
+@pytest.fixture(autouse=True)
+def isolated_logging():
+    tmp = tempfile.mkdtemp()
+    logging.basicConfig(
+        log_folder=tmp,
+        log_folder_mode="overwrite",  # Clean state per test
+        force=True,
+    )
+    yield
+    logging.shutdown()
 ```
 
 ---

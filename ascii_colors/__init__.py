@@ -10,7 +10,7 @@ from ascii_colors.constants import (
 from ascii_colors.utils import strip_ansi, get_trace_exception
 from ascii_colors.formatters import Formatter, JSONFormatter
 from ascii_colors.handlers import (
-    Handler, ConsoleHandler, StreamHandler, FileHandler, RotatingFileHandler, handlers
+    Handler, ConsoleHandler, StreamHandler, FileHandler, RotatingFileHandler, FolderRouterHandler, handlers
 )
 from ascii_colors.core import ASCIIColors
 from ascii_colors.progress import ProgressBar
@@ -109,7 +109,7 @@ __all__ = [
     # Core
     "ASCIIColors", "LogLevel", "Formatter", "JSONFormatter", "Handler",
     "ConsoleHandler", "StreamHandler", "FileHandler", "RotatingFileHandler",
-    "handlers", "ProgressBar", "Menu", "MenuItem",
+    "FolderRouterHandler", "handlers", "ProgressBar", "Menu", "MenuItem",
     # Context management
     "set_context", "clear_context", "context", "get_thread_context",
     # Logging compat

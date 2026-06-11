@@ -116,6 +116,11 @@ class Formatter:
         return ("N/A", 0, "N/A")
 
     def format(self, level: LogLevel, message: str, timestamp: datetime, exc_info: Optional[Tuple], logger_name: str = 'root', **kwargs: Any) -> str:
+        # Normalize int -> LogLevel (standard logging passes plain ints; ascii_colors.constants
+        # also exports DEBUG/INFO/... as plain int aliases). IntEnum is a subclass of int, so
+        # we must explicitly exclude LogLevel to avoid re-wrapping.
+        if isinstance(level, int) and not isinstance(level, LogLevel):
+            level = LogLevel(level)
         level_name, level_no = level.name, level.value
         filename, lineno, funcName, pathname = "N/A", 0, "N/A", "N/A"
         
@@ -171,6 +176,9 @@ class JSONFormatter(Formatter):
 
     def format(self, level: LogLevel, message: str, timestamp: datetime, exc_info: Optional[Tuple], logger_name: str = 'root', **kwargs: Any) -> str:
         from ascii_colors.core import ASCIIColors
+        # Normalize int -> LogLevel for standard logging compatibility
+        if isinstance(level, int) and not isinstance(level, LogLevel):
+            level = LogLevel(level)
         filename, lineno, funcName, pathname = "N/A", 0, "N/A", "N/A"
         if self.include_source:
             try:
