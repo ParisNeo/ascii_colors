@@ -201,6 +201,33 @@ def getLogger(name: Optional[str] = None) -> _AsciiLoggerAdapter:
     return _logger_cache[name]
 
 
+def _add_dual_console_handler(
+    formatter: Formatter,
+    console_level: Optional[int],
+    console_stream: Optional[io.TextIOWrapper],
+) -> None:
+    """Attach a ConsoleHandler alongside a file/folder handler for dual logging.
+
+    Used by :func:`basicConfig` when ``also_console=True`` so a single
+    :func:`basicConfig` call can both persist logs to disk and mirror them
+    to the terminal.
+
+    Args:
+        formatter: The formatter to attach to the new console handler.
+        console_level: Optional explicit level for the console handler.
+            Falls back to the current ``ASCIIColors`` global level when
+            ``None``.
+        console_stream: Optional stream override for the console handler.
+            Defaults to ``sys.stderr``.
+    """
+    console_handler = ConsoleHandler(
+        level=console_level if console_level is not None else ASCIIColors._global_level,
+        stream=console_stream or sys.stderr,
+    )
+    console_handler.setFormatter(formatter)
+    ASCIIColors.add_handler(console_handler)
+
+
 def basicConfig(
     *,
     filename: Optional[str] = None,
@@ -218,6 +245,9 @@ def basicConfig(
     log_folder_backupCount: int = 0,
     file_maxBytes: int = 0,
     file_backupCount: int = 0,
+    also_console: bool = False,
+    console_level: Optional[int] = None,
+    console_stream: Optional[io.TextIOWrapper] = None,
 ) -> None:
     """
     Configure basic logging.
@@ -234,6 +264,27 @@ def basicConfig(
         file_maxBytes: Max size in bytes before rotating when using
             `filename` (0 disables rotation, uses plain FileHandler).
         file_backupCount: Number of backup files to keep when rotating.
+
+    Dual logging:
+        also_console: If True, also attach a ConsoleHandler when
+            configuring a file or folder-based handler. Useful for
+            getting both persistent file logs and real-time console
+            output. Has no effect when no file/folder handler is
+            configured (i.e. the default console-only path) or when
+            an explicit ``handlers=`` list is supplied.
+        console_level: Optional separate level for the added console
+            handler. Defaults to the global level when None.
+        console_stream: Optional separate stream for the added console
+            handler. Defaults to ``sys.stderr``.
+
+    Example:
+        >>> import ascii_colors as logging
+        >>> logging.basicConfig(
+        ...     filename="app.log",
+        ...     level=logging.INFO,
+        ...     also_console=True,            # mirror to terminal too
+        ...     console_level=logging.DEBUG,  # console can be chattier
+        ... )
     """
     # Check if already configured (thread-safe)
     with ASCIIColors._handler_lock:
@@ -276,6 +327,8 @@ def basicConfig(
         )
         hdlr.setFormatter(formatter)
         ASCIIColors.add_handler(hdlr)
+        if also_console:
+            _add_dual_console_handler(formatter, console_level, console_stream)
     else:
         # Create default console or rotating file handler
         if filename:
@@ -288,11 +341,14 @@ def basicConfig(
                 )
             else:
                 hdlr = FileHandler(filename, mode=filemode)
+            hdlr.setFormatter(formatter)
+            ASCIIColors.add_handler(hdlr)
+            if also_console:
+                _add_dual_console_handler(formatter, console_level, console_stream)
         else:
             hdlr = ConsoleHandler(stream=stream or sys.stderr)
-
-        hdlr.setFormatter(formatter)
-        ASCIIColors.add_handler(hdlr)
+            hdlr.setFormatter(formatter)
+            ASCIIColors.add_handler(hdlr)
     
     ASCIIColors._basicConfig_called = True
 

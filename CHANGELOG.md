@@ -10,6 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - chore(release): bump version to 0.11.6 and update .gitignore
 
+## [2026-06-15 01:11]
+
+- feat(logging): add dual console logging to basicConfig
+
+## [2026-06-15 01:11]
+
+- feat(logging): add dual console logging to basicConfig
+
 ## [2026-06-01 22:44]
 
 - feat: add purple color support
