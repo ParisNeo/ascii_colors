@@ -187,6 +187,10 @@ class ASCIIColors(ANSI):
     @staticmethod
     def orange(t: str, **k): return ASCIIColors.print(t, ANSI.color_orange, **k)
     @staticmethod
+    def gray(t: str, **k): return ASCIIColors.print(t, ANSI.color_bright_black, **k)
+    @staticmethod
+    def lightgray(t: str, **k): return ASCIIColors.print(t, ANSI.color_white, **k)
+    @staticmethod
     def bold(t: str, **k): return ASCIIColors.print(t, style=ANSI.style_bold, **k)
     @staticmethod
     def dim(t: str, **k): return ASCIIColors.print(t, style=ANSI.style_dim, **k)

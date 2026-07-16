@@ -352,14 +352,35 @@ class TestASCIIColors(unittest.TestCase):
         """Test direct color methods (red, green, etc.) write to stream."""
         # Create a capture stream
         capture = io.StringIO()
-        
+
         ASCIIColors.red("RedDirect", file=capture)
         output = capture.getvalue()
-        
+
         # Verify output
         self.assertIn("RedDirect", output)
         self.assertIn(ASCIIColors.color_red, output)
         self.assertTrue(output.endswith(ASCIIColors.color_reset + "\n"))
+
+    def test_gray_and_lightgray_methods(self):
+        """Test gray and lightgray color methods write to stream with correct colors."""
+        capture = io.StringIO()
+
+        ASCIIColors.gray("GrayText", file=capture)
+        output_gray = capture.getvalue()
+
+        self.assertIn("GrayText", output_gray)
+        self.assertIn(ASCIIColors.color_bright_black, output_gray)
+        self.assertTrue(output_gray.endswith(ASCIIColors.color_reset + "\n"))
+
+        capture.seek(0)
+        capture.truncate(0)
+
+        ASCIIColors.lightgray("LightGrayText", file=capture)
+        output_lightgray = capture.getvalue()
+
+        self.assertIn("LightGrayText", output_lightgray)
+        self.assertIn(ASCIIColors.color_white, output_lightgray)
+        self.assertTrue(output_lightgray.endswith(ASCIIColors.color_reset + "\n"))
 
     def test_composition_of_effects(self):
         """Test composition of effects (nesting calls)."""
