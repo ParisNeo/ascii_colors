@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - chore(release): bump version to 0.11.6 and update .gitignore
 
+## [2026-08-05 17:18]
+
+- refactor(ascii_colors): clean up logging and improve menu module imports
+
 ## [2026-07-16 05:49]
 
 - feat(core): add gray and lightgray color methods

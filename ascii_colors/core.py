@@ -91,8 +91,6 @@ class ASCIIColors(ANSI):
         
         if level < cls._global_level: return
         ts = datetime.now()
-        # NOTE: We now expect message to be pre-formatted by the caller
-        # This allows the logging adapter to handle its own formatting
         final_msg = message
         
         final_exc = None
@@ -124,15 +122,11 @@ class ASCIIColors(ANSI):
         if not text or "[" not in text:
             return text
             
-        # Check if rich module is available
         try:
-            # Import here to avoid circular imports
             from ascii_colors.rich.console import Console
-            # Create a minimal console just for markup processing
             console = Console(force_terminal=True, no_color=False)
             return console._apply_markup(text)
         except Exception:
-            # If rich fails, return text as-is
             return text
 
     @staticmethod
@@ -151,14 +145,12 @@ class ASCIIColors(ANSI):
             emit: Whether to actually print (False returns string only)
             markup: Whether to parse rich markup tags like [red], [bold], etc.
         """
-        # Apply rich markup parsing if enabled
         processed_text = text
         if markup:
             processed_text = ASCIIColors._apply_rich_markup(text)
         
         out = f"{style}{background}{color}{processed_text}{ANSI.color_reset}{end}"
         if emit: 
-            # Use sys.stdout.write to avoid double newlines from print
             file.write(out)
             if flush:
                 file.flush()
@@ -213,7 +205,6 @@ class ASCIIColors(ANSI):
         """
         if len(texts) != len(colors): raise ValueError("Mismatch")
         
-        # Process each segment for markup if enabled
         processed_texts = []
         for text in texts:
             processed = ASCIIColors._apply_rich_markup(text) if markup else text
@@ -242,7 +233,6 @@ class ASCIIColors(ANSI):
         """
         subtexts = [subtext] if isinstance(subtext, str) else subtext
         
-        # Apply markup preprocessing if enabled
         processed_text = ASCIIColors._apply_rich_markup(text) if markup else text
         
         if whole_line:
@@ -252,35 +242,26 @@ class ASCIIColors(ANSI):
                 c = highlight_color if any(st in s_l for st in subtexts) else color
                 out += f"{c}{s_l}{ANSI.color_reset}{line[len(s_l):]}"
         else:
-            # Need to handle already-marked-up text carefully
-            # Split by reset codes to preserve existing markup
             parts = processed_text.split(ANSI.color_reset)
             processed_parts = []
             for i, part in enumerate(parts):
                 if i > 0:
-                    # Re-apply color after each reset
                     part = color + part
                 
-                # Apply highlighting within this part
                 for st in subtexts:
-                    # Only highlight if not already colored by markup
-                    # This is a simplification - complex markup may need more handling
                     if ANSI.color_reset not in part and st in part:
                         part = part.replace(st, f"{highlight_color}{st}{ANSI.color_reset}{color}")
                 
                 processed_parts.append(part)
             
-            # Join without adding extra resets
             if len(processed_parts) > 1:
                 out = ANSI.color_reset.join(processed_parts)
             else:
                 out = processed_parts[0] if processed_parts else processed_text
                 
-            # Ensure we start with the base color
             if not out.startswith(ANSI.color_reset) and not any(out.startswith(c) for c in [ANSI.color_red, ANSI.color_green, ANSI.color_yellow, ANSI.color_blue, ANSI.color_magenta, ANSI.color_cyan, ANSI.color_white, ANSI.color_orange, ANSI.color_black, '\033[']):
                 out = f"{color}{out}"
             
-            # Ensure proper reset at end
             if not out.endswith(ANSI.color_reset):
                 out = f"{out}{ANSI.color_reset}"
             else:
@@ -334,13 +315,12 @@ class ASCIIColors(ANSI):
         """
         suff = "[Y/n]" if default_yes is True else ("[y/N]" if default_yes is False else "[y/n]")
         
-        # Process question for markup if enabled
         processed_question = ASCIIColors._apply_rich_markup(question) if markup else question
         
         p = f"{processed_question} {suff}? "
         while True:
             try:
-                ASCIIColors.print(p, color=prompt_color, end="", flush=True, file=file, markup=False)  # Don't re-process markup in prompt
+                ASCIIColors.print(p, color=prompt_color, end="", flush=True, file=file, markup=False)
                 c = input().lower().strip()
                 if c in ('y', 'yes'): return True
                 if c in ('n', 'no'): return False
@@ -373,7 +353,6 @@ class ASCIIColors(ANSI):
             
             return console.input(text, markup=True, password=hide_input)
 
-        # Fallback for no markup
         full = f"{style}{color}{text}{ANSI.color_reset}"
         try:
             file.write(full)
@@ -383,8 +362,6 @@ class ASCIIColors(ANSI):
             file.write("\n")
             file.flush()
             return ""
-
-    # ============== Rich-style markup printing ==============
 
     @staticmethod
     def rich_print(text: str, **kwargs: Any) -> None:
@@ -403,7 +380,6 @@ class ASCIIColors(ANSI):
         console = Console()
         console.print(text, **kwargs)
 
-    # ============== New Rich-style methods ==============
     @staticmethod
     def panel(
         content: str|dict,
@@ -434,20 +410,17 @@ class ASCIIColors(ANSI):
                     lines.append(f"{tab}[bold]{key}[/bold]: {val}")
             return "\n".join(lines)
 
-        # Convert dict to formatted string with rich markup
         if isinstance(content, dict):
             content = format_dict(content)
         else:
             content = str(content)
         
-        # Convert string box name to enum
         box_style = BoxStyle.SQUARE
         try:
             box_style = BoxStyle(box)
         except ValueError:
             pass
         
-        # Parse style
         style_obj = Style()
         if border_style:
             style_obj = Style.parse(border_style)
@@ -456,14 +429,9 @@ class ASCIIColors(ANSI):
         if background:
             style_obj = Style(background=background)
         
-        # Normalize newlines in content
         normalized_content = content.replace('\r\n', '\n').replace('\r', '\n')
         
-        # Check if content has markup tags that span multiple lines
-        # If so, apply markup to each line individually to ensure proper formatting
         if '[/' in normalized_content and '\n' in normalized_content:
-            # Try to find outermost tags that wrap all content
-            # Pattern matches [tag]...content...[/tag] where content can span lines
             outer_tag_pattern = r'^\[([\w\s]+)\](.*?)\[/\1\]$'
             match = re.match(outer_tag_pattern, normalized_content, re.DOTALL)
             
@@ -471,77 +439,68 @@ class ASCIIColors(ANSI):
                 tag = match.group(1)
                 inner_content = match.group(2)
                 inner_lines = inner_content.split('\n')
-                # Wrap each inner line with the same tag, then apply markup
                 processed_lines = [ASCIIColors._apply_rich_markup(f'[{tag}]{line}[/{tag}]') for line in inner_lines]
                 processed_content = '\n'.join(processed_lines)
             else:
-                # No simple outer tag pattern, apply markup normally
-                # This might not handle multi-line tags perfectly, but it's the best we can do
                 processed_content = ASCIIColors._apply_rich_markup(normalized_content)
         else:
-            # No multi-line markup, apply normally
             processed_content = ASCIIColors._apply_rich_markup(normalized_content)
         
-        # Calculate appropriate width based on longest line (not total content length)
         term_width = ASCIIColors._get_terminal_width()
         
-        # Split by newlines to find longest line for width calculation
         content_lines = processed_content.split('\n')
         
-        # Find the longest line length (excluding ANSI codes for width calculation)
         from ascii_colors.utils import strip_ansi
         longest_line_len = max((len(strip_ansi(line)) for line in content_lines), default=0)
         
-        # Parse padding to get horizontal padding value
         if isinstance(padding, int):
             pad_x = padding
         elif len(padding) == 2:
-            pad_x = padding[1]  # (vertical, horizontal)
+            pad_x = padding[1]
         else:
-            pad_x = padding[1]  # (top, right, bottom, left)
+            pad_x = padding[1]
         
-        # Calculate panel width: must fit longest line + 2 borders + 2*pad_x padding
-        # inner_width = panel_width - 2 (borders)
-        # content_width = inner_width - 2*pad_x = panel_width - 2 - 2*pad_x
-        # We need content_width >= longest_line_len
-        # So: panel_width >= longest_line_len + 2 + 2*pad_x
         min_panel_width = longest_line_len + 2 + 2 * pad_x
         
         if width is None:
-            # Use min of: terminal width minus margin, or calculated minimum
             panel_width = min(term_width - 4, max(40, min_panel_width))
         else:
             panel_width = min(width, term_width - 2)
         
-        # Ensure panel is wide enough for the longest line plus borders and padding
         panel_width = max(panel_width, min_panel_width)
         
-        # Apply rich markup to title if provided
         processed_title = None
         if title:
             processed_title = ASCIIColors._apply_rich_markup(title)
-        
-        # Create a Text object with no_wrap=True to prevent re-wrapping
-        # This tells Panel to respect the explicit newlines in the content
-        text_obj = Text(processed_content, no_wrap=True)
-        
-        # Create Panel with the Text object
-        panel = Panel(
-            text_obj,
-            title=processed_title,
-            border_style=style_obj,
-            box=box_style,
-            padding=padding,
-            width=panel_width,
-        )
-        
-        # Render to string using capture
-        console = Console(width=panel_width + 2, force_terminal=False)
+
+        text_obj = Text(processed_content)
+
+        if width is not None:
+            panel = Panel(
+                text_obj,
+                title=processed_title,
+                border_style=style_obj,
+                box=box_style,
+                padding=padding,
+                width=width,
+                expand=False
+            )
+            console_width = width + 2
+        else:
+            panel = Panel.fit(
+                text_obj,
+                title=processed_title,
+                border_style=style_obj,
+                box=box_style,
+                padding=padding
+            )
+            console_width = ASCIIColors._get_terminal_width()
+
+        console = Console(width=console_width, force_terminal=False)
         with console.capture() as capture:
             console.print(panel)
-        
+
         result = capture.get()
-        # Remove trailing newlines to prevent double spacing
         return result.rstrip('\n')
 
     @staticmethod
@@ -566,7 +525,6 @@ class ASCIIColors(ANSI):
         except ValueError:
             pass
         
-        # Apply rich markup to title if provided
         processed_title = None
         if title:
             processed_title = ASCIIColors._apply_rich_markup(title)
@@ -581,11 +539,9 @@ class ASCIIColors(ANSI):
         
         if rows:
             for row in rows:
-                # Apply rich markup to each cell
                 processed_row = [ASCIIColors._apply_rich_markup(str(cell)) for cell in row]
                 table.add_row(*processed_row)
         
-        # Calculate width based on content
         term_width = ASCIIColors._get_terminal_width()
         table_width = min(term_width - 4, 120)
         
@@ -609,7 +565,6 @@ class ASCIIColors(ANSI):
         """
         from ascii_colors.rich import Tree, Style
         
-        # Apply rich markup to label
         processed_label = ASCIIColors._apply_rich_markup(label)
         
         style_obj = Style.parse(style) if style else Style()
@@ -654,7 +609,6 @@ class ASCIIColors(ANSI):
         """
         from ascii_colors.rich import Markdown, Console
         
-        # Apply rich markup to markdown content (for any embedded tags)
         processed_markup = ASCIIColors._apply_rich_markup(markup)
         
         md = Markdown(processed_markup)
@@ -679,7 +633,6 @@ class ASCIIColors(ANSI):
         """
         from ascii_colors.rich import Columns, Text, Console
         
-        # Apply rich markup to each item
         renderables = [Text(ASCIIColors._apply_rich_markup(item)) for item in items]
         cols = Columns(renderables, equal=equal, width=width)
         
@@ -708,7 +661,6 @@ class ASCIIColors(ANSI):
         console = Console(width=ASCIIColors._get_terminal_width())
         style_obj = Style.parse(style) if style else None
         
-        # Apply rich markup to title
         processed_title = ASCIIColors._apply_rich_markup(title)
         
         console.rule(processed_title, characters=characters, style=style_obj, align=align)
@@ -730,7 +682,6 @@ class ASCIIColors(ANSI):
         """
         from ascii_colors.rich import Status, Console, Style
         
-        # Apply rich markup to message
         processed_message = ASCIIColors._apply_rich_markup(message)
         
         console = Console(width=ASCIIColors._get_terminal_width())
@@ -761,7 +712,6 @@ class ASCIIColors(ANSI):
         
         from ascii_colors.rich import Text
         if isinstance(renderable, str):
-            # Apply rich markup to string renderables
             processed = ASCIIColors._apply_rich_markup(renderable)
             renderable = Text(processed)
         
@@ -781,4 +731,3 @@ class ASCIIColors(ANSI):
             return shutil.get_terminal_size().columns
         except Exception:
             return 80
-
