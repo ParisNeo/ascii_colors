@@ -518,7 +518,7 @@ class Console:
                 
                 if use_emoji:
                     output = self._process_emoji(output)
-                if use_markup:
+                if use_markup and '\x1b[' not in output:
                     output = self._apply_markup(output)
                 if use_highlight and self.highlighter:
                     output = self.highlighter.highlight(output)

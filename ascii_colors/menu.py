@@ -58,6 +58,7 @@ class Menu:
         self.unselected_icon = kwargs.get('unselected_icon', "☐")
         self.pointer = kwargs.get('pointer', "❯")
         self._sel_idx = 0
+        self._viewport_offset = 0
         self._filter = ""
         self._quit = False
         self._result: Any = None
@@ -66,6 +67,8 @@ class Menu:
         self._file: IO[str] = kwargs.get('file', sys.stdout)
         self._last_frame_lines: int = 0
         self._intro_text: Optional[str] = kwargs.get('intro_text', None)
+        self.back_text: str = kwargs.get('back_text', "← Back")
+        self.quit_text: str = kwargs.get('quit_text', "✕ Quit")
     
     def set_intro(self, text: str) -> 'Menu':
         """Set introductory text to display below the menu title."""
@@ -158,8 +161,34 @@ class Menu:
         buffer.append("\n")
         lines_written += 1
         
-        for i, item in enumerate(items):
-            is_selected = i == self._sel_idx
+        header_height = lines_written
+        try:
+            term_height = shutil.get_terminal_size().lines
+        except Exception:
+            term_height = 25
+            
+        viewport_size = max(10, term_height - header_height - 2)
+        
+        total_items = len(items)
+        if total_items > viewport_size:
+            if self._viewport_offset < 0:
+                self._viewport_offset = 0
+            elif self._viewport_offset > total_items - viewport_size:
+                self._viewport_offset = total_items - viewport_size
+                
+            if self._sel_idx < self._viewport_offset:
+                self._viewport_offset = self._sel_idx
+            elif self._sel_idx >= self._viewport_offset + viewport_size:
+                self._viewport_offset = self._sel_idx - viewport_size + 1
+                
+            visible_items = items[self._viewport_offset:self._viewport_offset + viewport_size]
+        else:
+            visible_items = items
+            self._viewport_offset = 0
+        
+        for i, item in enumerate(visible_items):
+            actual_idx = i + self._viewport_offset
+            is_selected = actual_idx == self._sel_idx
             
             if is_selected:
                 prefix = f"{ANSI.color_green}{self.pointer}{ANSI.color_reset} "
@@ -204,8 +233,6 @@ class Menu:
         
         self._last_frame_lines = lines_written
 
-        # If the new frame is shorter than the previous one, pad with clear-lines
-        # to erase any trailing ghost lines from the previous render.
         if lines_written < previous_frame_lines:
             diff = previous_frame_lines - lines_written
             for _ in range(diff):
@@ -218,6 +245,7 @@ class Menu:
          
     def run(self) -> Any:
         """Run the menu and return result based on mode."""
+        self._quit = False
         try:
             while not self._quit:
                 if self.enable_filtering and self._filter:
@@ -227,10 +255,11 @@ class Menu:
                 else:
                     display_items = list(self.items)
                 
-                if self.parent:
-                    display_items.append(MenuItem("← Back", "back"))
-                elif self.mode == self.MODE_EXECUTE:
-                    display_items.append(MenuItem("✕ Quit", "quit"))
+                if self.mode == self.MODE_EXECUTE:
+                    if self.parent:
+                        display_items.append(MenuItem(self.back_text, "back"))
+                    else:
+                        display_items.append(MenuItem(self.quit_text, "quit"))
                 
                 self._ensure_valid_selection(display_items)
                 
@@ -275,9 +304,12 @@ class Menu:
                 elif self.enable_filtering:
                     if key == 'BACKSPACE':
                         self._filter = self._filter[:-1]
+                        self._sel_idx = 0
+                        self._viewport_offset = 0
                     elif len(key) == 1 and key.isprintable():
                         self._filter += key
                         self._sel_idx = 0
+                        self._viewport_offset = 0
             
             self._write("\n")
             self._file.flush()
@@ -293,20 +325,16 @@ class Menu:
         
         n = len(display_items)
         
-        # Clamp to valid range first
         if self._sel_idx >= n:
             self._sel_idx = n - 1
         if self._sel_idx < 0:
             self._sel_idx = 0
         
-        # If current selection is disabled, find the nearest non-disabled one
         if display_items[self._sel_idx].disabled:
-            # Search forward
             for i in range(self._sel_idx, n):
                 if not display_items[i].disabled:
                     self._sel_idx = i
                     return
-            # Search backward
             for i in range(self._sel_idx - 1, -1, -1):
                 if not display_items[i].disabled:
                     self._sel_idx = i
@@ -321,7 +349,6 @@ class Menu:
         if n <= 1:
             return
         
-        # Use modular arithmetic to find next non-disabled item
         current = self._sel_idx
         for step in range(1, n + 1):
             new_idx = (current + direction * step) % n
@@ -336,11 +363,11 @@ class Menu:
             
         if item.item_type == 'back':
             self._quit = True
-            return None
+            return item.value
             
         elif item.item_type == 'quit':
             self._quit = True
-            return None
+            return item.value
             
         elif item.item_type == 'submenu':
             if self._last_frame_lines > 0:
@@ -403,44 +430,15 @@ class Menu:
                     self._clear_previous_frame()
                     self._last_frame_lines = 0
 
-                start_cursor_row = None
-                try:
-                    if hasattr(self._file, 'tell'):
-                        start_cursor_row = self._file.tell()
-                except (OSError, ValueError, io.UnsupportedOperation):
-                    start_cursor_row = None
-
-                result = item.target()
-
-                end_cursor_row = None
-                try:
-                    if hasattr(self._file, 'tell'):
-                        end_cursor_row = self._file.tell()
-                except (OSError, ValueError, io.UnsupportedOperation):
-                    end_cursor_row = None
-
-                if start_cursor_row is not None and end_cursor_row is not None:
-                    try:
-                        emitted_text = self._file.getvalue()[start_cursor_row:end_cursor_row]
-                        emitted_lines = emitted_text.count('\n')
-                        if emitted_lines > 0:
-                            self._file.write(f"\033[{emitted_lines}A")
-                            for _ in range(emitted_lines):
-                                self._file.write("\r\033[K\n")
-                            self._file.write(f"\033[{emitted_lines}A")
-                            self._file.flush()
-                    except (AttributeError, OSError, ValueError, io.UnsupportedOperation):
-                        pass
+                _ = item.target()
 
                 if self.mode in (self.MODE_SELECT, self.MODE_RETURN, self.MODE_CHECKBOX):
-                    return result
-                if item.exit_on_success and result is not False:
                     return item.value
-                return None
+                return item.value if item.value is not None else True
             else:
                 if self.mode not in (self.MODE_EXECUTE,):
                     return item.value
-                return None
+                return True
                 
         return None  
     
