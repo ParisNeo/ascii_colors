@@ -172,3 +172,8 @@ profile = "black" # Make isort compatible with black
 line_length = 100
 # skip_glob = ['*/setup.py'] # Example if you needed to skip specific files
 # known_first_party = ["ascii_colors"] # Helps isort group your own imports correctly
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+asyncio_default_fixture_loop_scope = "function"

@@ -355,82 +355,96 @@ class Console:
         return "".join(codes) if codes else ""
     
     def _apply_markup(self, text: str) -> str:
-        """Apply rich markup like [bold]text[/bold] or [magenta]text[/magenta]."""
+        """Apply rich markup like [bold]text[/bold], [magenta]text[/magenta], or [red]text[/]."""
         if self.no_color:
             return re.sub(r"\[/?[^\]]+\]", "", text)
-        
-        if not text or "[" not in text:
+
+        if not text or ("[" not in text and "\x1b" not in text and "\033" not in text):
             return text
-        
-        # Process emoji first
+
         text = self._process_emoji(text)
-        
-        # Simple case: no closing tags, return as-is
-        if "[/" not in text:
-            # Check if there are any opening tags
-            if not re.search(r'\[[\w\s#]+\]', text):
-                return text
-        
+
         result = []
         i = 0
-        style_stack = []
-        
-        while i < len(text):
+        style_stack: List[Tuple[str, str]] = []
+        text_len = len(text)
+
+        while i < text_len:
+            # Check for escaped bracket: \[
+            if text[i] == '\\' and i + 1 < text_len and text[i+1] == '[':
+                result.append('[')
+                i += 2
+                continue
+
+            # Check for ANSI escape sequences: \x1b[... or \033[... and preserve verbatim
+            if text[i:i+2] in ('\x1b[', '\033['):
+                j = i + 2
+                while j < text_len and text[j] not in 'ABCDEFGHJKSTfmnsulh':
+                    j += 1
+                if j < text_len:
+                    j += 1
+                result.append(text[i:j])
+                i = j
+                continue
+
+            # Check for markup tag: [...]
             if text[i] == '[':
-                # Look for closing bracket
                 end = i + 1
-                while end < len(text) and text[end] != ']':
+                while end < text_len and text[end] != ']':
                     end += 1
-                
-                if end < len(text) and text[end] == ']':
+
+                if end < text_len and text[end] == ']':
                     tag_content = text[i+1:end]
-                    
-                    if tag_content.startswith('/'):
-                        # Closing tag - use full normalized content for matching
-                        full_closing_tag = tag_content[1:].lower().strip()
-                        # Normalize: collapse multiple spaces, strip
-                        normalized_close = ' '.join(full_closing_tag.split())
-                        
-                        # Find matching opening tag in stack
-                        new_stack = []
+
+                    # Shorthand closing tag: [/]
+                    if tag_content == "/":
+                        if style_stack:
+                            style_stack.pop()
+                            result.append(ANSI.color_reset)
+                            for _, ansi in style_stack:
+                                result.append(ansi)
+                        i = end + 1
+                        continue
+
+                    # Explicit closing tag: [/bold], [/red], etc.
+                    if tag_content.startswith("/"):
+                        closing_tag = ' '.join(tag_content[1:].lower().strip().split())
                         found = False
-                        for j, (stack_tag, ansi) in enumerate(style_stack):
-                            # Compare normalized versions
-                            if not found and stack_tag == normalized_close:
+                        new_stack = []
+                        for stack_tag, ansi in reversed(style_stack):
+                            if not found and stack_tag == closing_tag:
                                 found = True
                             else:
-                                new_stack.append((stack_tag, ansi))
-                        
+                                new_stack.insert(0, (stack_tag, ansi))
+
                         if found:
                             style_stack = new_stack
                             result.append(ANSI.color_reset)
-                            # Re-apply remaining styles
                             for _, ansi in style_stack:
                                 result.append(ansi)
-                        
+                        i = end + 1
+                        continue
+
+                    # Opening tag
+                    ansi_codes = self._parse_rich_markup_tag(tag_content)
+                    if ansi_codes:
+                        normalized_open = ' '.join(tag_content.lower().strip().split())
+                        style_stack.append((normalized_open, ansi_codes))
+                        result.append(ansi_codes)
                         i = end + 1
                         continue
                     else:
-                        # Opening tag - store full normalized tag for matching
-                        full_opening_tag = tag_content.lower().strip()
-                        # Normalize: collapse multiple spaces, strip
-                        normalized_open = ' '.join(full_opening_tag.split())
-                        
-                        ansi_codes = self._parse_rich_markup_tag(tag_content)
-                        if ansi_codes:
-                            style_stack.append((normalized_open, ansi_codes))
-                            result.append(ansi_codes)
-                        
+                        # Non-tag bracketed text (e.g. [1/5], [y/N]), preserve literal text
+                        result.append(text[i:end+1])
                         i = end + 1
                         continue
-            
+
             result.append(text[i])
             i += 1
-        
-        # Ensure we reset at the end if we opened any styles
+
         if style_stack:
             result.append(ANSI.color_reset)
-        
+
         return ''.join(result)
     
     def render(

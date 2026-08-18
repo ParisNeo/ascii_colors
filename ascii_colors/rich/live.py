@@ -177,11 +177,18 @@ class Live:
             # Flush output
             _builtin_print("", end="", flush=True, file=self.console.file)
     
-    def update(self, renderable: Renderable, *, refresh: bool = False) -> None:
-        """Update the renderable."""
+    def update(self, renderable: Optional[Renderable] = None, *, refresh: bool = False) -> None:
+        """Update the renderable and refresh display.
+
+        Args:
+            renderable: New renderable or Panel to display. If None, the current
+                renderable is refreshed in-place (ideal when panel.update() was used).
+            refresh: Force an immediate render refresh.
+        """
         with self._lock:
-            self.renderable = renderable
-        
+            if renderable is not None:
+                self.renderable = renderable
+
         if refresh or not self.auto_refresh:
             self.refresh()
     

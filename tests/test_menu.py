@@ -1,6 +1,11 @@
 import io
+import os
 import sys
+from pathlib import Path
 from unittest.mock import patch, MagicMock
+
+# Ensure local source is imported
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pytest
 
@@ -84,7 +89,7 @@ def test_submenu_cursor_synchronization():
     
     parent.add_submenu("Go to Submenu", submenu)
     
-    keys = iter(["DOWN", "ENTER", "ENTER"])
+    keys = iter(["DOWN", "DOWN", "ENTER", "ENTER"])
     parent._key_source = keys
     submenu._key_source = keys
     
@@ -107,9 +112,58 @@ def test_quit_key_execution_mode():
     menu = Menu("Test Menu", mode=Menu.MODE_EXECUTE, file=buffer)
     menu.add_action("Action 1")
     menu.add_action("Action 2")
-    
+
     menu._key_source = iter(["q"])
     result = menu.run()
-    
+
     assert result is None, f"Expected None when quitting, got {result}"
     assert menu._quit is True, "Menu did not set _quit flag to True"
+
+
+def test_menu_shortcuts_and_separators():
+    """Test menu shortcuts and separators."""
+    buffer = io.StringIO()
+    menu = Menu("Shortcuts Menu", mode=Menu.MODE_RETURN, enable_shortcuts=True, file=buffer)
+    menu.add_choice("First Choice", value=1, shortcut="1")
+    menu.add_separator("--- Section 2 ---")
+    menu.add_choice("Second Choice", value=2, shortcut="2")
+
+    # Press '2' directly for hotkey instant selection
+    menu._key_source = iter(["2"])
+    result = menu.run()
+    assert result == 2
+
+
+def test_menu_checkbox_toggle_all_and_invert():
+    """Test checkbox 'a' (toggle all) and 'i' (invert selection)."""
+    buffer = io.StringIO()
+    menu = Menu("Checkbox Menu", mode=Menu.MODE_CHECKBOX, file=buffer)
+    menu.add_checkbox("Item 1", value="A", checked=False)
+    menu.add_checkbox("Item 2", value="B", checked=False)
+
+    # Press 'a' (select all), then ENTER to confirm
+    menu._key_source = iter(["a", "ENTER"])
+    result = menu.run()
+    assert result == ["A", "B"]
+
+    # Press 'i' (invert selection from initially checked item)
+    menu2 = Menu("Invert Menu", mode=Menu.MODE_CHECKBOX, file=buffer)
+    menu2.add_checkbox("Item 1", value="A", checked=True)
+    menu2.add_checkbox("Item 2", value="B", checked=False)
+    menu2._key_source = iter(["i", "ENTER"])
+    result2 = menu2.run()
+    assert result2 == ["B"]
+
+
+def test_menu_default_initial_selection():
+    """Test menu opening with default selection index/value."""
+    buffer = io.StringIO()
+    menu = Menu("Default Selection Menu", mode=Menu.MODE_RETURN, default="Target", file=buffer)
+    menu.add_choice("Choice 1", value="First")
+    menu.add_choice("Choice 2", value="Target")
+    menu.add_choice("Choice 3", value="Third")
+
+    # Press ENTER immediately to select default
+    menu._key_source = iter(["ENTER"])
+    result = menu.run()
+    assert result == "Target"

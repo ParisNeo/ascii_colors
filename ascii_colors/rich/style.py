@@ -19,6 +19,7 @@ RICH_COLOR_MAP: Dict[str, str] = {
     "cyan": ANSI.color_cyan,
     "white": ANSI.color_white,
     "orange": ANSI.color_orange,
+    "purple": ANSI.color_purple,
     
     # Bright colors
     "bright_black": ANSI.color_bright_black,
@@ -40,6 +41,7 @@ RICH_COLOR_MAP: Dict[str, str] = {
     "bg_cyan": ANSI.color_bg_cyan,
     "bg_white": ANSI.color_bg_white,
     "bg_orange": ANSI.color_bg_orange,
+    "bg_purple": ANSI.color_bg_purple,
     
     # Bright background colors
     "bg_bright_black": ANSI.color_bg_bright_black,
@@ -116,6 +118,8 @@ class Color:
             "magenta": (255, 0, 255),
             "cyan": (0, 255, 255),
             "white": (255, 255, 255),
+            "orange": (255, 135, 0),
+            "purple": (128, 0, 128),
             "bright_black": (85, 85, 85),
             "bright_red": (255, 85, 85),
             "bright_green": (85, 255, 85),
@@ -232,6 +236,7 @@ class Style:
                     "green": ANSI.color_green, "yellow": ANSI.color_yellow,
                     "blue": ANSI.color_blue, "magenta": ANSI.color_magenta,
                     "cyan": ANSI.color_cyan, "white": ANSI.color_white,
+                    "orange": ANSI.color_orange, "purple": ANSI.color_purple,
                     "bright_black": ANSI.color_bright_black,
                     "bright_red": ANSI.color_bright_red,
                     "bright_green": ANSI.color_bright_green,
@@ -256,6 +261,7 @@ class Style:
                     "green": ANSI.color_bg_green, "yellow": ANSI.color_bg_yellow,
                     "blue": ANSI.color_bg_blue, "magenta": ANSI.color_bg_magenta,
                     "cyan": ANSI.color_bg_cyan, "white": ANSI.color_bg_white,
+                    "orange": ANSI.color_bg_orange, "purple": ANSI.color_bg_purple,
                     "bright_black": ANSI.color_bg_bright_black,
                     "bright_red": ANSI.color_bg_bright_red,
                     "bright_green": ANSI.color_bg_bright_green,
@@ -295,6 +301,10 @@ class BoxStyle(Enum):
     SIMPLE = "simple"
     SIMPLE_HEAD = "simple_head"
     DOUBLE = "double"
+    HEAVY = "heavy"
+    ASCII = "ascii"
+    HORIZONTALS = "horizontals"
+    MARKDOWN = "markdown"
     
     def get_chars(self) -> Dict[str, str]:
         """Get characters for this box style."""
@@ -324,6 +334,36 @@ class BoxStyle(Enum):
             chars["top_t"] = "╦"
             chars["bottom_t"] = "╩"
             chars["cross"] = "╬"
+        elif self == BoxStyle.HEAVY:
+            chars["top_left"] = "┏"
+            chars["top_right"] = "┓"
+            chars["bottom_left"] = "┗"
+            chars["bottom_right"] = "┛"
+            chars["horizontal"] = "━"
+            chars["vertical"] = "┃"
+            chars["left_t"] = "┣"
+            chars["right_t"] = "┫"
+            chars["top_t"] = "┳"
+            chars["bottom_t"] = "┻"
+            chars["cross"] = "╋"
+        elif self == BoxStyle.ASCII:
+            chars = {
+                "top_left": "+", "top_right": "+",
+                "bottom_left": "+", "bottom_right": "+",
+                "horizontal": "-", "vertical": "|",
+                "left_t": "+", "right_t": "+",
+                "top_t": "+", "bottom_t": "+",
+                "cross": "+",
+            }
+        elif self == BoxStyle.HORIZONTALS:
+            chars = {
+                "top_left": "─", "top_right": "─",
+                "bottom_left": "─", "bottom_right": "─",
+                "horizontal": "─", "vertical": " ",
+                "left_t": "─", "right_t": "─",
+                "top_t": "─", "bottom_t": "─",
+                "cross": "─",
+            }
         elif self == BoxStyle.MINIMAL:
             chars = {
                 "top_left": " ", "top_right": " ",
@@ -335,3 +375,21 @@ class BoxStyle(Enum):
             }
         
         return chars
+
+
+class _BoxNamespace:
+    """Namespace providing box styles matching the Rich API."""
+    SQUARE = BoxStyle.SQUARE
+    ROUND = BoxStyle.ROUND
+    MINIMAL = BoxStyle.MINIMAL
+    MINIMAL_HEAVY_HEAD = BoxStyle.MINIMAL_HEAVY_HEAD
+    SIMPLE = BoxStyle.SIMPLE
+    SIMPLE_HEAD = BoxStyle.SIMPLE_HEAD
+    DOUBLE = BoxStyle.DOUBLE
+    HEAVY = BoxStyle.HEAVY
+    ASCII = BoxStyle.ASCII
+    HORIZONTALS = BoxStyle.HORIZONTALS
+    MARKDOWN = BoxStyle.MARKDOWN
+
+
+box = _BoxNamespace()

@@ -8,7 +8,7 @@ This module is organized into submodules for better maintainability.
 """
 
 from ascii_colors.rich.console import Console, ConsoleOptions, Measurement, Prompt, Confirm
-from ascii_colors.rich.style import Style, Color, BoxStyle
+from ascii_colors.rich.style import Style, Color, BoxStyle, box
 from ascii_colors.rich.text import Text, Renderable
 from ascii_colors.rich.layout import Panel, Padding, Columns, Rule
 from ascii_colors.rich.table import Table
@@ -123,7 +123,7 @@ class RichModule:
             screen=screen,
         )
     
-    # Expose classes
+    # Expose classes and presets
     Console = Console
     Text = Text
     Style = Style
@@ -137,6 +137,7 @@ class RichModule:
     Live = Live
     Status = Status
     BoxStyle = BoxStyle
+    box = box
     Renderable = Renderable
     ConsoleOptions = ConsoleOptions
     Measurement = Measurement

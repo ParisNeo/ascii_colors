@@ -51,8 +51,8 @@ from ascii_colors.rich import (
     Syntax, Markdown,
     # Live display
     Live, Status,
-    # Enums
-    BoxStyle,
+    # Enums & Presets
+    BoxStyle, box,
     # Default instances
     rich,
     # Convenience functions
@@ -132,7 +132,7 @@ __all__ = [
     "Table", "Tree",
     "Syntax", "Markdown",
     "Live", "Status",
-    "BoxStyle",
+    "BoxStyle", "box",
     "rich_print", "rich_log", "rich_rule", "rich_prompt", # Convenience functions
     # Aliases to avoid name conflicts
     "RichText",

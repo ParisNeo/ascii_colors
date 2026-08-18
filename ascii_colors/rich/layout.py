@@ -5,62 +5,38 @@ Layout components: Panel, Padding, and Columns.
 
 import re
 import textwrap
-from typing import Dict, Iterable, Iterator, List, Optional, Tuple, Union, TYPE_CHECKING, cast
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple, Union, TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from ascii_colors.rich.console import Console, ConsoleOptions
 
 from ascii_colors.constants import ANSI
-from ascii_colors.rich.style import Style, BoxStyle
+from ascii_colors.rich.style import Style, BoxStyle, box
 from ascii_colors.rich.text import Text, Renderable, wcswidth
 
 # Import Measurement at module level for type annotations
 from ascii_colors.rich.console import Measurement
 
 # ANSI escape sequence regex - compile once for efficiency
-ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]+m")
+ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
+
+_UNSET = object()
 
 
 def visual_width(text: str) -> int:
-    """Calculate the visual width of text, ignoring ANSI escape codes.
-    
-    This properly handles emojis and wide characters (CJK, etc.) which
-    typically take 2 terminal columns instead of 1.
-    
-    Args:
-        text: String that may contain ANSI escape codes
-    
-    Returns:
-        Visual width in terminal columns
-    """
+    """Calculate the visual width of text, ignoring ANSI escape codes."""
     plain = ANSI_ESCAPE.sub("", text)
     return wcswidth(plain)
 
 
 def wrap_line_preserving_ansi(line: str, max_width: int) -> List[str]:
-    """Wrap a line that may contain ANSI codes and emojis.
-    
-    Handles:
-    - ANSI escape codes (preserved but don't count towards width)
-    - Emojis and wide characters (properly counted as 2 columns)
-    - Existing ANSI reset codes are stripped from wrapped lines to avoid
-      color bleed, then re-applied if needed
-    
-    Args:
-        line: The line to wrap (may contain ANSI codes)
-        max_width: Maximum visual width per line
-    
-    Returns:
-        List of wrapped lines
-    """
+    """Wrap a line that may contain ANSI codes and wide characters."""
     if not line:
         return [""]
     
-    # Check if line fits without wrapping
     if visual_width(line) <= max_width:
         return [line]
     
-    # Need to wrap - handle ANSI codes and wide characters carefully
     result_lines = []
     current_line = ""
     current_visual_width = 0
@@ -68,31 +44,19 @@ def wrap_line_preserving_ansi(line: str, max_width: int) -> List[str]:
     line_len = len(line)
     
     while i < line_len:
-        # Check for ANSI escape sequence
-        if line[i:i+2] == '\033[':
-            # Find end of ANSI sequence
+        if line[i:i+2] in ('\033[', '\x1b['):
             j = i + 2
             while j < line_len and line[j] not in 'ABCDEFGHJKSTfmnsulh':
                 j += 1
             if j < line_len:
-                j += 1  # Include the final character
-            # Add ANSI code without counting towards visual width
+                j += 1
             current_line += line[i:j]
             i = j
         else:
-            # Regular character - check visual width
             char = line[i]
             char_width = wcswidth(char)
             
-            # Handle potential multi-byte characters
-            if char_width > 1 and i + 1 < line_len:
-                # Check if this might be part of a multi-byte sequence
-                # For emojis specifically, they're usually single Unicode chars
-                pass
-            
-            # Check if adding this char would exceed width
             if current_visual_width + char_width > max_width and current_line:
-                # Start a new line
                 result_lines.append(current_line)
                 current_line = ""
                 current_visual_width = 0
@@ -101,7 +65,6 @@ def wrap_line_preserving_ansi(line: str, max_width: int) -> List[str]:
             current_visual_width += char_width
             i += 1
     
-    # Add remaining content
     if current_line:
         result_lines.append(current_line)
     
@@ -129,7 +92,6 @@ class Padding:
         if isinstance(pad, int):
             return (pad, pad, pad, pad)
         
-        # At this point, pad must be a tuple
         pad_tuple = cast(Tuple[int, ...], pad)
         
         if len(pad_tuple) == 2:
@@ -137,7 +99,6 @@ class Padding:
         elif len(pad_tuple) == 4:
             return (pad_tuple[0], pad_tuple[1], pad_tuple[2], pad_tuple[3])
         else:
-            # Fallback for unexpected tuple lengths - use first element or defaults
             first = pad_tuple[0] if len(pad_tuple) > 0 else 0
             return (first, first, first, first)
     
@@ -146,8 +107,6 @@ class Padding:
         console: "Console",
         options: "ConsoleOptions",
     ) -> Iterator[Renderable]:
-        from ascii_colors.rich.console import ConsoleOptions
-        
         top, right, bottom, left = self.pad
         
         for _ in range(top):
@@ -163,14 +122,15 @@ class Padding:
             yield Text(" " * options.max_width)
 
 
-class Panel:
-    """A bordered panel around content.
+class Panel(Renderable):
+    """A bordered panel around content with in-place update support.
     
-    This class properly handles:
-    - Emoji and wide characters (counted as 2 terminal columns)
-    - Rich markup tags like [bold], [red], etc.
-    - ANSI escape codes for colors and styles
-    - Multi-line content with proper wrapping
+    This class supports:
+    - Rich markup tags and ANSI codes
+    - In-place updates via update() and property assignment
+    - Title on top border and Subtitle on bottom border with left/center/right alignment
+    - Auto-sizing with Panel.fit() and expand=False
+    - Custom BoxStyles (SQUARE, ROUND, DOUBLE, HEAVY, ASCII, etc.)
     """
     
     def __init__(
@@ -178,6 +138,8 @@ class Panel:
         renderable: Union[Renderable, str],
         title: Optional[str] = None,
         title_align: str = "center",
+        subtitle: Optional[str] = None,
+        subtitle_align: str = "center",
         style: Optional[Union[str, Style]] = None,
         border_style: Optional[Union[str, Style]] = None,
         box: Union[BoxStyle, str] = BoxStyle.SQUARE,
@@ -185,17 +147,92 @@ class Panel:
         width: Optional[int] = None,
         height: Optional[int] = None,
         expand: bool = True,
+        highlight: bool = False,
     ):
-        self.renderable = renderable if isinstance(renderable, Renderable) else Text(renderable)
+        self._renderable = renderable if isinstance(renderable, Renderable) else Text(renderable)
         self.title = title
         self.title_align = title_align
+        self.subtitle = subtitle
+        self.subtitle_align = subtitle_align
         self.style = style if isinstance(style, Style) else (Style.parse(style) if style else None)
         self.border_style = border_style if isinstance(border_style, Style) else (Style.parse(border_style) if border_style else None)
-        self.box = box if isinstance(box, BoxStyle) else BoxStyle.SQUARE
+        self.box = box if isinstance(box, BoxStyle) else (BoxStyle(box) if isinstance(box, str) and box in [b.value for b in BoxStyle] else BoxStyle.SQUARE)
         self.padding = padding if isinstance(padding, tuple) else (padding, padding)
         self.width = width
         self.height = height
         self.expand = expand
+        self.highlight = highlight
+
+    @property
+    def renderable(self) -> Union[Renderable, str]:
+        """Get the panel renderable content."""
+        return self._renderable
+
+    @renderable.setter
+    def renderable(self, value: Union[Renderable, str]) -> None:
+        """Set the panel renderable content."""
+        self._renderable = value if isinstance(value, Renderable) else Text(value)
+
+    def update(
+        self,
+        renderable: Optional[Union[Renderable, str]] = None,
+        *,
+        title: Any = _UNSET,
+        title_align: Any = _UNSET,
+        subtitle: Any = _UNSET,
+        subtitle_align: Any = _UNSET,
+        style: Any = _UNSET,
+        border_style: Any = _UNSET,
+        box: Any = _UNSET,
+        padding: Any = _UNSET,
+        width: Any = _UNSET,
+        height: Any = _UNSET,
+        expand: Any = _UNSET,
+    ) -> "Panel":
+        """Update panel content and attributes in-place.
+        
+        Args:
+            renderable: New content to display in the panel.
+            title: New title on top border.
+            title_align: Alignment of title ('left', 'center', 'right').
+            subtitle: New subtitle on bottom border.
+            subtitle_align: Alignment of subtitle ('left', 'center', 'right').
+            style: Inner styling.
+            border_style: Border color / styling.
+            box: Box drawing style.
+            padding: Inner padding tuple or int.
+            width: Explicit width override.
+            height: Explicit height override.
+            expand: Whether panel expands to full available width.
+            
+        Returns:
+            self for convenient method chaining.
+        """
+        if renderable is not None:
+            self.renderable = renderable
+        if title is not _UNSET:
+            self.title = title
+        if title_align is not _UNSET:
+            self.title_align = title_align
+        if subtitle is not _UNSET:
+            self.subtitle = subtitle
+        if subtitle_align is not _UNSET:
+            self.subtitle_align = subtitle_align
+        if style is not _UNSET:
+            self.style = style if isinstance(style, Style) else (Style.parse(style) if style else None)
+        if border_style is not _UNSET:
+            self.border_style = border_style if isinstance(border_style, Style) else (Style.parse(border_style) if border_style else None)
+        if box is not _UNSET:
+            self.box = box if isinstance(box, BoxStyle) else (BoxStyle(box) if isinstance(box, str) and box in [b.value for b in BoxStyle] else BoxStyle.SQUARE)
+        if padding is not _UNSET:
+            self.padding = padding if isinstance(padding, tuple) else (padding, padding)
+        if width is not _UNSET:
+            self.width = width
+        if height is not _UNSET:
+            self.height = height
+        if expand is not _UNSET:
+            self.expand = expand
+        return self
 
     @classmethod
     def fit(
@@ -203,6 +240,8 @@ class Panel:
         renderable: Union[Renderable, str],
         title: Optional[str] = None,
         title_align: str = "center",
+        subtitle: Optional[str] = None,
+        subtitle_align: str = "center",
         style: Optional[Union[str, Style]] = None,
         border_style: Optional[Union[str, Style]] = None,
         box: Union[BoxStyle, str] = BoxStyle.SQUARE,
@@ -215,6 +254,8 @@ class Panel:
             renderable,
             title=title,
             title_align=title_align,
+            subtitle=subtitle,
+            subtitle_align=subtitle_align,
             style=style,
             border_style=border_style,
             box=box,
@@ -232,7 +273,6 @@ class Panel:
         if isinstance(pad, int):
             return (pad, pad, pad, pad)
         
-        # At this point, pad must be a tuple
         pad_tuple = cast(Tuple[int, ...], pad)
         
         if len(pad_tuple) == 2:
@@ -240,9 +280,9 @@ class Panel:
         elif len(pad_tuple) == 4:
             return (pad_tuple[0], pad_tuple[1], pad_tuple[2], pad_tuple[3])
         else:
-            # Fallback for unexpected tuple lengths - use first element or defaults
             first = pad_tuple[0] if len(pad_tuple) > 0 else 0
-            return (first, first, first, first)    
+            return (first, first, first, first)
+
     def __rich_console__(
         self,
         console: "Console",
@@ -250,322 +290,121 @@ class Panel:
     ) -> Iterator[Union[str, Renderable]]:
         chars = self.box.get_chars()
         
-        # Cap panel width to terminal width with safety margin
         max_safe_width = min(options.max_width, console.width - 2) if hasattr(console, 'width') else options.max_width - 2
-        max_safe_width = max(max_safe_width, 20)  # Minimum width
+        max_safe_width = max(max_safe_width, 10)
         
-        if self.width:
-            panel_width = min(self.width, max_safe_width)
-        elif self.expand:
-            panel_width = max_safe_width
-        else:
-            panel_width = max_safe_width
-        
-        inner_width = panel_width - 2
-        
-        # Parse padding to get horizontal padding value
-        # Normalize to (top, right, bottom, left)
         padding_tuple = self._normalize_padding(self.padding)
         pad_y, pad_x = padding_tuple[0], padding_tuple[1]
         
-        content_width = inner_width - (pad_x * 2)
-        content_width = max(content_width, 1)
+        ansi_escape = re.compile(r"\033\[[0-9;]*[a-zA-Z]")
+        
+        if self.width:
+            panel_width = min(self.width, max_safe_width)
+        elif not self.expand:
+            title_w = 0
+            if self.title:
+                t_clean = console._apply_markup(self.title) if console.markup else self.title
+                title_w = wcswidth(ansi_escape.sub("", t_clean)) + 4
+            
+            sub_w = 0
+            if self.subtitle:
+                s_clean = console._apply_markup(self.subtitle) if console.markup else self.subtitle
+                sub_w = wcswidth(ansi_escape.sub("", s_clean)) + 4
+            
+            content_w = 0
+            if isinstance(self._renderable, str):
+                lines = self._renderable.split('\n')
+                content_w = max((wcswidth(ansi_escape.sub("", l)) for l in lines), default=0)
+            elif isinstance(self._renderable, Text):
+                lines = str(self._renderable.plain).split('\n')
+                content_w = max((wcswidth(ansi_escape.sub("", l)) for l in lines), default=0)
+            elif hasattr(self._renderable, '__rich_measure__'):
+                meas = self._renderable.__rich_measure__(console, options)
+                content_w = meas.maximum
+            else:
+                try:
+                    meas = Measurement.get(console, options, self._renderable)
+                    content_w = meas.maximum
+                except Exception:
+                    content_w = 20
+            
+            fitted = max(content_w + pad_x * 2 + 2, title_w, sub_w, 10)
+            panel_width = min(fitted, max_safe_width)
+        else:
+            panel_width = max_safe_width
+        
+        inner_width = max(panel_width - 2, 1)
+        content_width = max(inner_width - (pad_x * 2), 1)
 
-        # Ensure content_width is at least 1
-        content_width = max(content_width, 20)
-
-        # Render content to list of strings first to properly handle multi-line
         content_lines: List[str] = []
 
-        def wrap_line_with_ansi(line: str, max_width: int) -> List[str]:
-            """Wrap a line that may contain ANSI codes, preserving them correctly.
-
-            This handles emojis and wide characters properly by using visual width.
-            """
-            if not line:
-                return [""]
-
-            # Check if line fits without wrapping
-            plain = ansi_escape.sub("", line)
-            if wcswidth(plain) <= max_width:
-                return [line]
-
-            # Need to wrap - must handle ANSI codes and wide characters carefully
-            result_lines = []
-            current_line = ""
-            current_visual_width = 0
-            i = 0
-
-            while i < len(line):
-                # Check for ANSI escape sequence
-                if line[i:i+2] == '\033[':
-                    # Find end of ANSI sequence (ends with letter A-Z or m)
-                    j = i + 2
-                    while j < len(line) and line[j] not in 'ABCDEFGHJKSTfmnsulh':
-                        j += 1
-                    if j < len(line):
-                        j += 1  # Include the final character
-                    # Add ANSI code without counting towards visual width
-                    current_line += line[i:j]
-                    i = j
-                else:
-                    # Regular character - check visual width
-                    # Handle multi-byte characters (emojis, CJK, etc.)
-                    char = line[i]
-
-                    # Try to get multi-byte character if this is start of one
-                    if ord(char) > 127 or char == '\ufffd':
-                        # Could be start of multi-byte, try to get full character
-                        # Emojis can be 1-4 bytes in UTF-8
-                        char_width = wcswidth(char)
-                    else:
-                        char_width = wcswidth(char)
-
-                    # Check if adding this char would exceed width
-                    if current_visual_width + char_width > max_width and current_line:
-                        # Start a new line
-                        # Strip trailing ANSI reset to avoid color bleed issues
-                        result_lines.append(current_line)
-                        current_line = ""
-                        current_visual_width = 0
-
-                    current_line += char
-                    current_visual_width += char_width
-                    i += 1
-
-            # Add remaining content
-            if current_line:
-                result_lines.append(current_line)
-
-            return result_lines if result_lines else [""]
-
-        if isinstance(self.renderable, str):
-            # For strings, apply markup processing first
-            processed = console._apply_markup(self.renderable) if console.markup else self.renderable
-
-            # Split by explicit newlines first, then wrap each line if needed
+        if isinstance(self._renderable, str):
+            processed = console._apply_markup(self._renderable) if console.markup else self._renderable
             explicit_lines = processed.split('\n')
-
             for line in explicit_lines:
-                # Use the new wrapper that handles ANSI + emojis
-                wrapped = wrap_line_with_ansi(line, content_width)
+                wrapped = wrap_line_preserving_ansi(line, content_width)
                 content_lines.extend(wrapped)
-        elif isinstance(self.renderable, Text):
-            # For Text objects, get the plain content and process
-            plain_content = str(self.renderable.plain) if isinstance(self.renderable.plain, str) else str(self.renderable.plain)
-            
-            # Apply markup if the Text contains markup-like content
+        elif isinstance(self._renderable, Text):
+            plain_content = str(self._renderable.plain)
             if '[' in plain_content and console.markup:
                 processed = console._apply_markup(plain_content)
             else:
                 processed = plain_content
             
-            # Split by explicit newlines
             explicit_lines = processed.split('\n')
-            
             for line in explicit_lines:
-                plain_line = re.sub(r"\033\[[0-9;]+m", "", line)
-                if wcswidth(plain_line) <= content_width:
-                    content_lines.append(line)
-                else:
-                    # Need to wrap
-                    import textwrap
-                    if '\033[' in line:
-                        # Manual wrap with ANSI preservation
-                        current_line = ""
-                        current_width = 0
-                        i = 0
-                        while i < len(line):
-                            if line[i:i+2] == '\033[':
-                                j = i + 2
-                                while j < len(line) and line[j] not in 'ABCDEFGHJKSTfmnsulh':
-                                    j += 1
-                                if j < len(line):
-                                    j += 1
-                                current_line += line[i:j]
-                                i = j
-                            else:
-                                char_width = wcswidth(line[i])
-                                if current_width + char_width > content_width and current_width > 0:
-                                    content_lines.append(current_line)
-                                    current_line = line[i]
-                                    current_width = char_width
-                                else:
-                                    current_line += line[i]
-                                    current_width += char_width
-                                i += 1
-                        if current_line:
-                            content_lines.append(current_line)
-                    else:
-                        wrapped = textwrap.wrap(line, width=content_width)
-                        content_lines.extend(wrapped)
+                wrapped = wrap_line_preserving_ansi(line, content_width)
+                content_lines.extend(wrapped)
         else:
-            # For other renderables, render to string lines
             try:
-                rendered = console.render(self.renderable, options.update_width(content_width))
+                rendered = console.render(self._renderable, options.update_width(content_width))
                 for item in rendered:
-                    if isinstance(item, Text):
-                        line_str = str(item.plain) if isinstance(item.plain, str) else str(item)
-                    elif isinstance(item, str):
-                        line_str = item
-                    else:
-                        line_str = str(item)
-                    
-                    # Handle embedded newlines in rendered output
-                    if '\n' in line_str:
-                        sub_lines = line_str.split('\n')
-                        for sub_line in sub_lines:
-                            plain_sub = re.sub(r"\033\[[0-9;]+m", "", sub_line)
-                            if wcswidth(plain_sub) <= content_width:
-                                content_lines.append(sub_line)
-                            else:
-                                # Wrap if needed
-                                import textwrap
-                                if '\033[' in sub_line:
-                                    # Manual wrap
-                                    current_line = ""
-                                    current_width = 0
-                                    i = 0
-                                    while i < len(sub_line):
-                                        if sub_line[i:i+2] == '\033[':
-                                            j = i + 2
-                                            while j < len(sub_line) and sub_line[j] not in 'ABCDEFGHJKSTfmnsulh':
-                                                j += 1
-                                            if j < len(sub_line):
-                                                j += 1
-                                            current_line += sub_line[i:j]
-                                            i = j
-                                        else:
-                                            char_width = wcswidth(sub_line[i])
-                                            if current_width + char_width > content_width and current_width > 0:
-                                                content_lines.append(current_line)
-                                                current_line = sub_line[i]
-                                                current_width = char_width
-                                            else:
-                                                current_line += sub_line[i]
-                                                current_width += char_width
-                                            i += 1
-                                    if current_line:
-                                        content_lines.append(current_line)
-                                else:
-                                    wrapped = textwrap.wrap(sub_line, width=content_width)
-                                    content_lines.extend(wrapped)
-                    else:
-                        plain_line = re.sub(r"\033\[[0-9;]+m", "", line_str)
-                        if wcswidth(plain_line) <= content_width:
-                            content_lines.append(line_str)
-                        else:
-                            # Wrap if needed
-                            import textwrap
-                            if '\033[' in line_str:
-                                # Manual wrap with ANSI preservation
-                                current_line = ""
-                                current_width = 0
-                                i = 0
-                                while i < len(line_str):
-                                    if line_str[i:i+2] == '\033[':
-                                        j = i + 2
-                                        while j < len(line_str) and line_str[j] not in 'ABCDEFGHJKSTfmnsulh':
-                                            j += 1
-                                        if j < len(line_str):
-                                            j += 1
-                                        current_line += line_str[i:j]
-                                        i = j
-                                    else:
-                                        char_width = wcswidth(line_str[i])
-                                        if current_width + char_width > content_width and current_width > 0:
-                                            content_lines.append(current_line)
-                                            current_line = line_str[i]
-                                            current_width = char_width
-                                        else:
-                                            current_line += line_str[i]
-                                            current_width += char_width
-                                        i += 1
-                                if current_line:
-                                    content_lines.append(current_line)
-                            else:
-                                wrapped = textwrap.wrap(line_str, width=content_width)
-                                content_lines.extend(wrapped)
+                    line_str = str(item.plain) if isinstance(item, Text) else str(item)
+                    sub_lines = line_str.split('\n')
+                    for sub_line in sub_lines:
+                        wrapped = wrap_line_preserving_ansi(sub_line, content_width)
+                        content_lines.extend(wrapped)
             except Exception:
-                content_lines = [str(self.renderable)]
+                content_lines = [str(self._renderable)]
         
         border_ansi = str(self.border_style) if self.border_style else ""
         style_ansi = str(self.style) if self.style else ""
         reset = ANSI.color_reset
         
-        ansi_escape = re.compile(r"\033\[[0-9;]+m")
-        
-        def plain_width(text: str) -> int:
-            """Calculate visual width of text, stripping ANSI codes.
-            
-            This properly handles emojis and wide characters which take
-            2 terminal columns instead of 1.
-            """
-            plain = ansi_escape.sub("", text)
-            return wcswidth(plain)
-        
         def pad_line(line: str, width: int) -> str:
-            """Pad a line to the specified visual width.
-            
-            This properly handles:
-            - ANSI escape codes (don't count towards width)
-            - Emojis and wide characters (count as 2 columns each)
-            
-            Args:
-                line: The line to pad (may contain ANSI codes)
-                width: Target visual width (number of terminal columns)
-            
-            Returns:
-                The line padded with spaces to reach the target visual width
-            """
-            # Calculate visual width: strip ANSI codes first, then measure
             plain = ansi_escape.sub("", line)
-            visual_width = wcswidth(plain)
-            
-            if visual_width < width:
-                # Need padding - add spaces to reach target visual width
-                return line + " " * (width - visual_width)
-            # If line is at or exceeds target width, return as-is
+            vis_w = wcswidth(plain)
+            if vis_w < width:
+                return line + " " * (width - vis_w)
             return line
         
         # Build top border with title if present
         if self.title:
-            # Process title markup
             title_clean = console._apply_markup(self.title) if console.markup else self.title
-            
-            # Remove trailing reset codes from title to prevent style leakage
             title_clean = re.sub(r'\x1b\[0m$', '', title_clean)
             title_clean = re.sub(r'\x1b\[0m(?=\s*$)', '', title_clean)
             
             title_plain = ansi_escape.sub("", title_clean)
             title_width = wcswidth(title_plain)
-            
             available_for_lines = inner_width - title_width - 2
             
             if available_for_lines < 0:
-                max_title_len = inner_width - 4
+                max_title_len = max(1, inner_width - 4)
                 title_plain_truncated = title_plain[:max_title_len]
                 title_width = wcswidth(title_plain_truncated)
-                if console.markup:
-                    title_clean = title_plain_truncated
-                else:
-                    title_clean = title_plain_truncated
+                title_clean = title_plain_truncated
                 available_for_lines = inner_width - title_width - 2
             
             if self.title_align == "center":
-                left_line_len = available_for_lines // 2
-                right_line_len = available_for_lines - left_line_len
+                left_line_len = max(0, available_for_lines // 2)
+                right_line_len = max(0, available_for_lines - left_line_len)
             elif self.title_align == "right":
-                left_line_len = available_for_lines - 1
+                left_line_len = max(0, available_for_lines - 1)
                 right_line_len = 1
             else:
                 left_line_len = 1
-                right_line_len = available_for_lines - 1
+                right_line_len = max(0, available_for_lines - 1)
             
-            left_line_len = max(0, left_line_len)
-            right_line_len = max(0, right_line_len)
-            
-            # Build top border with proper style handling
             left_part = f"{border_ansi}{chars['top_left']}{chars['horizontal'] * left_line_len}{reset}"
             title_part = f" {title_clean} "
             right_part = f"{border_ansi}{chars['horizontal'] * right_line_len}{chars['top_right']}{reset}"
@@ -585,41 +424,74 @@ class Panel:
             fill = f"{style_ansi}{' ' * inner_width}{reset}" if self.style else " " * inner_width
             yield f"{border_ansi}{chars['vertical']}{reset}{fill}{border_ansi}{chars['vertical']}{reset}"
         
-        # Content rows with proper left padding - each line gets same padding
+        # Content rows
+        rendered_content_count = 0
         for line in content_lines:
-            # Strip any trailing newlines or carriage returns
             line = line.rstrip('\n\r')
-            
-            # Calculate the visual width of this line (including emojis)
-            # and ensure it fits within content_width
-            visual_len = wcswidth(ansi_escape.sub("", line))
-            
             padded_content = pad_line(line, content_width)
             
-            # Apply left and right padding
             if self.style:
                 styled_content = f"{style_ansi}{' ' * pad_x}{padded_content}{' ' * pad_x}{reset}"
             else:
                 styled_content = f"{' ' * pad_x}{padded_content}{' ' * pad_x}"
             
-            # Build full line
             yield (
                 f"{border_ansi}{chars['vertical']}{reset}"
                 f"{styled_content}"
                 f"{border_ansi}{chars['vertical']}{reset}"
             )
+            rendered_content_count += 1
             
         # Empty padding rows at bottom
         for _ in range(pad_y):
             fill = f"{style_ansi}{' ' * inner_width}{reset}" if self.style else " " * inner_width
             yield f"{border_ansi}{chars['vertical']}{reset}{fill}{border_ansi}{chars['vertical']}{reset}"
+
+        # Height filler rows if explicit height is larger than content
+        if self.height:
+            current_total_lines = 2 + pad_y * 2 + rendered_content_count
+            extra_lines_needed = max(0, self.height - current_total_lines)
+            for _ in range(extra_lines_needed):
+                fill = f"{style_ansi}{' ' * inner_width}{reset}" if self.style else " " * inner_width
+                yield f"{border_ansi}{chars['vertical']}{reset}{fill}{border_ansi}{chars['vertical']}{reset}"
         
-        # Bottom border
-        bottom_border = (
-            f"{border_ansi}{chars['bottom_left']}"
-            f"{chars['horizontal'] * inner_width}"
-            f"{chars['bottom_right']}{reset}"
-        )
+        # Bottom border (with subtitle if present)
+        if self.subtitle:
+            sub_clean = console._apply_markup(self.subtitle) if console.markup else self.subtitle
+            sub_clean = re.sub(r'\x1b\[0m$', '', sub_clean)
+            sub_clean = re.sub(r'\x1b\[0m(?=\s*$)', '', sub_clean)
+            
+            sub_plain = ansi_escape.sub("", sub_clean)
+            sub_width = wcswidth(sub_plain)
+            available_for_lines = inner_width - sub_width - 2
+            
+            if available_for_lines < 0:
+                max_sub_len = max(1, inner_width - 4)
+                sub_plain_truncated = sub_plain[:max_sub_len]
+                sub_width = wcswidth(sub_plain_truncated)
+                sub_clean = sub_plain_truncated
+                available_for_lines = inner_width - sub_width - 2
+            
+            if self.subtitle_align == "center":
+                left_line_len = max(0, available_for_lines // 2)
+                right_line_len = max(0, available_for_lines - left_line_len)
+            elif self.subtitle_align == "right":
+                left_line_len = max(0, available_for_lines - 1)
+                right_line_len = 1
+            else:
+                left_line_len = 1
+                right_line_len = max(0, available_for_lines - 1)
+            
+            left_part = f"{border_ansi}{chars['bottom_left']}{chars['horizontal'] * left_line_len}{reset}"
+            sub_part = f" {sub_clean} "
+            right_part = f"{border_ansi}{chars['horizontal'] * right_line_len}{chars['bottom_right']}{reset}"
+            bottom_border = left_part + sub_part + right_part
+        else:
+            bottom_border = (
+                f"{border_ansi}{chars['bottom_left']}"
+                f"{chars['horizontal'] * inner_width}"
+                f"{chars['bottom_right']}{reset}"
+            )
         yield bottom_border
     
     def __rich_measure__(
@@ -658,17 +530,17 @@ class Rule(Renderable):
 
         if self.title:
             title_clean = console._apply_markup(self.title) if console.markup else self.title
-            title_plain = re.sub(r"\033\[[0-9;]+m", "", title_clean)
+            title_plain = re.sub(r"\033\[[0-9;]*[a-zA-Z]", "", title_clean)
             title_width = wcswidth(title_plain)
             char_width = width - title_width - 2
 
             if self.align == "left":
-                left, right = 0, char_width
+                left, right = 0, max(0, char_width)
             elif self.align == "right":
-                left, right = char_width, 0
+                left, right = max(0, char_width), 0
             else:
-                left = char_width // 2
-                right = char_width - left
+                left = max(0, char_width // 2)
+                right = max(0, char_width - left)
 
             left_part = self.characters * left
             right_part = self.characters * right
@@ -754,14 +626,12 @@ class Columns:
             max_lines = 0
             
             for item in row:
-                # Handle different types properly
                 if isinstance(item, Text):
                     lines = [str(line.plain) if isinstance(line.plain, str) else str(line) for line in item.wrap(col_width - self.padding)]
                 elif isinstance(item, str):
                     text = Text(item)
                     lines = [str(line.plain) if isinstance(line.plain, str) else str(line) for line in text.wrap(col_width - self.padding)]
                 else:
-                    # For other renderables, render to string lines
                     try:
                         rendered = console.render(item, options.update_width(col_width - self.padding))
                         lines = [str(line) for line in rendered]

@@ -27,6 +27,7 @@ from threading import Lock
 import threading # Needed for ProgressBar tests
 from typing import Optional
 
+
 # Ensure the module path is correct for testing
 # Ensure the local module path is prioritized for testing
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -36,7 +37,7 @@ import ascii_colors # Import the module itself for easier access
 from ascii_colors import (
     ASCIIColors, LogLevel, Formatter, JSONFormatter,
     Handler, ConsoleHandler, FileHandler, RotatingFileHandler,
-    ProgressBar, Menu, MenuItem,
+    ProgressBar, Menu, MenuItem, Console, Panel,
     get_trace_exception, trace_exception
 )
 # Import compatibility layer components
@@ -52,6 +53,33 @@ from ascii_colors.questionary import (
     text, password, confirm, select, checkbox, autocomplete, form, ask
 )
 
+import io
+import os
+import sys
+import time
+from pathlib import Path
+from unittest.mock import patch, MagicMock
+
+# Ensure local source is prioritized over site-packages
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+import pytest
+
+# Import the library
+import ascii_colors as ac
+from ascii_colors import (
+    ASCIIColors, LogLevel, ProgressBar, Menu, MenuItem,
+    Formatter, JSONFormatter, ConsoleHandler, FileHandler,
+    CRITICAL, ERROR, WARNING, INFO, DEBUG, NOTSET,
+)
+from ascii_colors.rich import (
+    Console, Style, Color, BoxStyle, box, Text as RichText, Panel, Table, Tree,
+    Syntax, Markdown, Columns, Padding, Rule, Live, Status
+)
+from ascii_colors.questionary import (
+    text, password, confirm, select, checkbox, autocomplete, form,
+    PromptText, Text, Password, Confirm, Select, Checkbox, Autocomplete, Form
+)
 
 # Helper to strip ANSI codes (unchanged)
 ANSI_ESCAPE_REGEX = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
@@ -805,6 +833,75 @@ class TestQuestionaryCompat(unittest.TestCase):
         self.assertIsInstance(autocomplete("Q", ["a"]), Autocomplete)
         self.assertIsInstance(form(text("Q")), Form)
 
+    def test_live_creation(self):
+        """Test Live display creation."""
+        console = Console(force_terminal=True)
+        panel = Panel("Initial")
+        live = Live(panel, console=console, auto_refresh=False)
+        assert live.renderable == panel
+        
+        # Update renderable
+        new_panel = Panel("Updated")
+        live.update(new_panel)
+        assert live.renderable == new_panel
+
+    def test_panel_in_place_update(self):
+        """Test building a panel and updating it in-place."""
+        console = Console(width=40, force_terminal=True, no_color=False)
+        panel = Panel("Initial Step", title="Step 1", subtitle="Progress: 10%")
+        
+        with console.capture() as capture:
+            console.print(panel)
+        output1 = capture.get()
+        assert "Initial Step" in output1
+        assert "Step 1" in output1
+        assert "Progress: 10%" in output1
+        
+        # Update content, title, and subtitle in-place
+        panel.update("Completed Step", title="Step 2", subtitle="Progress: 100%", border_style="green")
+        
+        with console.capture() as capture:
+            console.print(panel)
+        output2 = capture.get()
+        assert "Completed Step" in output2
+        assert "Step 2" in output2
+        assert "Progress: 100%" in output2
+
+    def test_panel_property_setters(self):
+        """Test updating panel properties directly."""
+        panel = Panel("Start")
+        panel.renderable = "Changed"
+        panel.title = "New Title"
+        panel.subtitle = "New Subtitle"
+        assert str(panel.renderable) == "Changed"
+        assert panel.title == "New Title"
+        assert panel.subtitle == "New Subtitle"
+
+    def test_panel_box_styles(self):
+        """Test panel with various box styles including box.ROUND and box.DOUBLE."""
+        from ascii_colors.rich import box
+        console = Console(width=40, force_terminal=True, no_color=False)
+        
+        # Round box
+        round_panel = Panel("Round Content", box=box.ROUND)
+        with console.capture() as capture:
+            console.print(round_panel)
+        assert "╭" in capture.get()
+        
+        # Double box
+        double_panel = Panel("Double Content", box=box.DOUBLE)
+        with console.capture() as capture:
+            console.print(double_panel)
+        assert "╔" in capture.get()
+
+    def test_markup_shorthand_closing_and_brackets(self):
+        """Test shorthand [/] tag and non-tag bracket preservation."""
+        console = Console(force_terminal=True, no_color=False)
+        with console.capture() as capture:
+            console.print("Processing [1/5] done [bold]styled[/] end")
+        out = capture.get()
+        assert "[1/5]" in out
+        assert "styled" in out
 
 if __name__ == "__main__":
     unittest.main()

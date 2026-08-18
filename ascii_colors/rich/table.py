@@ -88,6 +88,23 @@ class Table(Renderable):
     def add_row(self, *cells: str, style: Optional[Union[str, Style]] = None) -> None:
         """Add a row to the table."""
         self.rows.append(list(cells))
+
+    def clear(self) -> None:
+        """Clear all data rows from the table."""
+        self.rows.clear()
+
+    def update(
+        self,
+        *,
+        title: Optional[str] = None,
+        caption: Optional[str] = None,
+    ) -> "Table":
+        """Update table metadata in-place."""
+        if title is not None:
+            self.title = title
+        if caption is not None:
+            self.caption = caption
+        return self
     
     def __rich_console__(
         self,

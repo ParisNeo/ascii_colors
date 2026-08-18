@@ -382,14 +382,17 @@ class ASCIIColors(ANSI):
 
     @staticmethod
     def panel(
-        content: str|dict,
+        content: Any,
         title: Optional[str] = None,
+        subtitle: Optional[str] = None,
         border_style: str = "",
         box: str = "square",
         padding: Union[int, Tuple[int, ...]] = (0, 1),
         width: Optional[int] = None,
+        height: Optional[int] = None,
         color: str = "",
         background: str = "",
+        expand: bool = False,
     ) -> str:
         """
         Create a bordered panel around content. Returns string for printing.
@@ -475,25 +478,20 @@ class ASCIIColors(ANSI):
 
         text_obj = Text(processed_content)
 
+        panel = Panel(
+            text_obj,
+            title=processed_title,
+            subtitle=subtitle,
+            border_style=style_obj,
+            box=box_style,
+            padding=padding,
+            width=width,
+            height=height,
+            expand=expand or (width is not None),
+        )
         if width is not None:
-            panel = Panel(
-                text_obj,
-                title=processed_title,
-                border_style=style_obj,
-                box=box_style,
-                padding=padding,
-                width=width,
-                expand=False
-            )
             console_width = width + 2
         else:
-            panel = Panel.fit(
-                text_obj,
-                title=processed_title,
-                border_style=style_obj,
-                box=box_style,
-                padding=padding
-            )
             console_width = ASCIIColors._get_terminal_width()
 
         console = Console(width=console_width, force_terminal=False)
