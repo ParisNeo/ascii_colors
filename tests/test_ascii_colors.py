@@ -903,8 +903,102 @@ class TestQuestionaryCompat(unittest.TestCase):
         assert "[1/5]" in out
         assert "styled" in out
 
-if __name__ == "__main__":
-    unittest.main()
+    def test_table_default_round_borders_and_spacing(self):
+        """Test table default style has rounded borders, vertical separators, and padding."""
+        console = Console(width=60, force_terminal=True, no_color=False)
+        table = Table("Header A", "Header B")
+        table.add_row("Value 1", "Value 2")
+
+        with console.capture() as capture:
+            console.print(table)
+        output = capture.get()
+
+        # Verify rounded box corners and borders
+        assert "╭" in output, "Expected top-left rounded corner"
+        assert "╮" in output, "Expected top-right rounded corner"
+        assert "╰" in output, "Expected bottom-left rounded corner"
+        assert "╯" in output, "Expected bottom-right rounded corner"
+        assert "│" in output, "Expected vertical column separator"
+        assert "┬" in output, "Expected top column divider"
+        assert "┴" in output, "Expected bottom column divider"
+        assert "├" in output and "┤" in output, "Expected header separator"
+
+        # Verify content with spacing
+        assert "Header A" in output
+        assert "Header B" in output
+        assert "Value 1" in output
+        assert "Value 2" in output
+
+    def test_table_custom_box_styles_and_strings(self):
+        """Test table rendering with double and square box styles (both enum and string)."""
+        console = Console(width=60, force_terminal=True, no_color=False)
+
+        # Double box style
+        double_table = Table("Col 1", "Col 2", box="double")
+        double_table.add_row("A", "B")
+        with console.capture() as capture:
+            console.print(double_table)
+        double_out = capture.get()
+        assert "╔" in double_out
+        assert "═" in double_out
+        assert "║" in double_out
+        assert "╚" in double_out
+
+        # Square box style
+        square_table = Table("Col 1", "Col 2", box=BoxStyle.SQUARE)
+        square_table.add_row("X", "Y")
+        with console.capture() as capture:
+            console.print(square_table)
+        square_out = capture.get()
+        assert "┌" in square_out
+        assert "─" in square_out
+        assert "└" in square_out
+
+    def test_table_column_alignment_and_padding(self):
+        """Test column alignment and padding options."""
+        console = Console(width=60, force_terminal=True, no_color=False)
+        table = Table(padding=(0, 2))
+        table.add_column("Left", justify="left")
+        table.add_column("Center", justify="center")
+        table.add_column("Right", justify="right")
+        table.add_row("1", "2", "3")
+
+        with console.capture() as capture:
+            console.print(table)
+        out = capture.get()
+        assert "Left" in out
+        assert "Center" in out
+        assert "Right" in out
+        assert "  1  " in out or " 1 " in out
+
+    def test_ascii_colors_table_convenience_method(self):
+        """Test ASCIIColors.table helper returns formatted table string with borders."""
+        rendered = ASCIIColors.table(
+            "Service", "Status",
+            rows=[["Database", "Online"], ["API Gateway", "Healthy"]],
+            title="System Health"
+        )
+        assert "System Health" in rendered
+        assert "Database" in rendered
+        assert "Online" in rendered
+        assert "API Gateway" in rendered
+        assert "Healthy" in rendered
+        # Verify border characters are included in default output
+        assert "╭" in rendered or "─" in rendered
+
+    def test_table_clear_and_update(self):
+        """Test Table clear() and update() operations."""
+        table = Table("Item", "Price", title="Menu")
+        table.add_row("Coffee", "$3.00")
+        assert len(table.rows) == 1
+
+        table.clear()
+        assert len(table.rows) == 0
+
+        table.update(title="Updated Menu", caption="All prices USD")
+        assert table.title == "Updated Menu"
+        assert table.caption == "All prices USD"
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -506,47 +506,54 @@ class ASCIIColors(ANSI):
         *headers: str,
         rows: Optional[List[List[str]]] = None,
         title: Optional[str] = None,
-        box: str = "square",
+        box: str = "round",
         show_lines: bool = False,
         header_style: str = "bold",
+        border_style: Optional[str] = None,
+        padding: Union[int, Tuple[int, ...]] = (0, 1),
     ) -> str:
         """
-        Create a formatted table. Returns string for printing.
-        
+        Create a formatted table with borders and cell padding. Returns string for printing.
+
         New rich-style convenience method.
         """
         from ascii_colors.rich import Table, BoxStyle, Console
-        
-        box_style = BoxStyle.SQUARE
-        try:
-            box_style = BoxStyle(box)
-        except ValueError:
-            pass
-        
+
+        box_style = BoxStyle.ROUND
+        if isinstance(box, str):
+            try:
+                box_style = BoxStyle(box.lower())
+            except ValueError:
+                pass
+        elif isinstance(box, BoxStyle):
+            box_style = box
+
         processed_title = None
         if title:
             processed_title = ASCIIColors._apply_rich_markup(title)
-        
+
         table = Table(
             *[ASCIIColors._apply_rich_markup(h) for h in headers],
             title=processed_title,
             box=box_style,
             show_lines=show_lines,
             header_style=header_style,
+            border_style=border_style,
+            padding=padding,
         )
-        
+
         if rows:
             for row in rows:
                 processed_row = [ASCIIColors._apply_rich_markup(str(cell)) for cell in row]
                 table.add_row(*processed_row)
-        
+
         term_width = ASCIIColors._get_terminal_width()
         table_width = min(term_width - 4, 120)
-        
+
         console = Console(width=table_width, force_terminal=False)
         with console.capture() as capture:
             console.print(table)
-        
+
         return capture.get().rstrip('\n')
 
     @staticmethod

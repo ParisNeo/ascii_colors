@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - chore(release): bump version to 0.11.6 and update .gitignore
 
+## [2026-08-18 09:26]
+
+- fix(core): update table rendering and bump version to 0.12.1
+
 ## [2026-08-18 08:23]
 
 - refactor(rich): improve console markup handling and enhance panel content types
