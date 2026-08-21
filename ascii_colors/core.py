@@ -21,6 +21,7 @@ class ASCIIColors(ANSI):
     _handler_lock: Lock = Lock()
     _basicConfig_called: bool = False
     _context: threading.local = threading.local()
+    _at_line_start: bool = True
 
     _level_colors: Dict[LogLevel, str] = {
         LogLevel.DEBUG: ANSI.style_dim + ANSI.color_white,
@@ -148,12 +149,18 @@ class ASCIIColors(ANSI):
         processed_text = text
         if markup:
             processed_text = ASCIIColors._apply_rich_markup(text)
-        
+
+        if not ASCIIColors._at_line_start:
+            stripped = processed_text.lstrip()
+            if stripped.startswith(("┌", "╭", "╔", "┏", "╓", "╒", "┍", "┎")):
+                file.write("\n")
+
         out = f"{style}{background}{color}{processed_text}{ANSI.color_reset}{end}"
         if emit: 
             file.write(out)
             if flush:
                 file.flush()
+            ASCIIColors._at_line_start = end.endswith('\n')
         return out
 
     @staticmethod
@@ -214,6 +221,7 @@ class ASCIIColors(ANSI):
         file.write(out)
         if flush:
             file.flush()
+        ASCIIColors._at_line_start = end.endswith('\n')
 
     @staticmethod
     def highlight(text: str, subtext: Union[str, List[str]], color: str = ANSI.color_white, highlight_color: str = ANSI.color_yellow, whole_line: bool = False, end: str = "\n", flush: bool = False, file: Any = sys.stdout, markup: bool = False) -> None:
@@ -270,6 +278,7 @@ class ASCIIColors(ANSI):
         file.write(out + end)
         if flush:
             file.flush()
+        ASCIIColors._at_line_start = end.endswith('\n')
 
     @staticmethod
     def execute_with_animation(pending_text: str, func: Callable[..., _T], *args: Any, color: Optional[str] = None, **kwargs: Any) -> _T:
@@ -325,8 +334,9 @@ class ASCIIColors(ANSI):
                 if c in ('y', 'yes'): return True
                 if c in ('n', 'no'): return False
                 if c == '' and default_yes is not None: return default_yes
-                ASCIIColors.print("Invalid input.", color=ANSI.color_red, file=file)
+                ASCIIColors.print("Invalid input.", color=ASCIIColors.color_red, file=file)
             except KeyboardInterrupt: return False
+        ASCIIColors._at_line_start = True
 
     @staticmethod
     def prompt(text: str, color: str = ANSI.color_green, style: str = "", hide_input: bool = False, file: Any = sys.stdout, markup: bool = True) -> str:
@@ -357,10 +367,13 @@ class ASCIIColors(ANSI):
         try:
             file.write(full)
             file.flush()
-            return getpass.getpass(prompt="") if hide_input else input()
+            result = getpass.getpass(prompt="") if hide_input else input()
+            ASCIIColors._at_line_start = True
+            return result
         except KeyboardInterrupt: 
             file.write("\n")
             file.flush()
+            ASCIIColors._at_line_start = True
             return ""
 
     @staticmethod
@@ -498,8 +511,7 @@ class ASCIIColors(ANSI):
         with console.capture() as capture:
             console.print(panel)
 
-        result = capture.get()
-        return result.rstrip('\n')
+        return capture.get().rstrip('\n')
 
     @staticmethod
     def table(
@@ -602,7 +614,7 @@ class ASCIIColors(ANSI):
         console = Console(width=min(term_width - 4, 120), force_terminal=False)
         with console.capture() as capture:
             console.print(syntax)
-        
+
         return capture.get().rstrip('\n')
 
     @staticmethod
@@ -622,7 +634,7 @@ class ASCIIColors(ANSI):
         console = Console(width=min(term_width - 4, 100), force_terminal=False)
         with console.capture() as capture:
             console.print(md)
-        
+
         return capture.get().rstrip('\n')
 
     @staticmethod
@@ -646,7 +658,7 @@ class ASCIIColors(ANSI):
         console = Console(width=col_width, force_terminal=False)
         with console.capture() as capture:
             console.print(cols)
-        
+
         return capture.get().rstrip('\n')
 
     @staticmethod
