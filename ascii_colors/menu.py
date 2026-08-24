@@ -88,6 +88,7 @@ class Menu:
         intro_text: Optional[str] = None,
         back_text: str = "← Back",
         quit_text: str = "✕ Quit",
+        exit_text: Optional[str] = None,
         panel: bool = False,
         border_style: str = "cyan",
         viewport_size: Optional[int] = None,
@@ -111,6 +112,7 @@ class Menu:
         self._intro_text = intro_text
         self.back_text = back_text
         self.quit_text = quit_text
+        self.exit_text = exit_text
         self.panel = panel
         self.border_style = border_style
         self._custom_viewport_size = viewport_size
@@ -427,7 +429,8 @@ class Menu:
                     if self.parent:
                         display_items.append(MenuItem(self.back_text, "back"))
                     else:
-                        display_items.append(MenuItem(self.quit_text, "quit"))
+                        exit_label = self.exit_text if self.exit_text is not None else self.quit_text
+                        display_items.append(MenuItem(exit_label, "quit"))
                 
                 self._ensure_valid_selection(display_items)
                 self._display(display_items)
@@ -574,13 +577,9 @@ class Menu:
         if item.disabled or item.item_type == 'separator':
             return None
             
-        if item.item_type == 'back':
+        if item.item_type in ('back', 'quit'):
             self._quit = True
-            return item.value
-            
-        elif item.item_type == 'quit':
-            self._quit = True
-            return item.value
+            return None
             
         elif item.item_type == 'submenu':
             if self._last_frame_lines > 0:

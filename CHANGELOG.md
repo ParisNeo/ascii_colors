@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - chore(release): bump version to 0.11.6 and update .gitignore
 
+## [2026-08-24 08:13]
+
+- feat(menu): add custom exit_text option and unify back/quit handling
+
 ## [2026-08-21 15:02]
 
 - fix(core): track line start state to prevent box-drawing character misalignment
