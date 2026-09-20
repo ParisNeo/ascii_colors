@@ -162,4 +162,5 @@ cython_debug/
 
 # lollms vscoder
 .lollms
+.lollms_code
 logs
