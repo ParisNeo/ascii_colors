@@ -77,9 +77,23 @@ class Syntax(Renderable):
                 
                 if char in "\"'":
                     quote = char
+                    # Triple-quoted strings: """...""" or '''...'''
+                    if line[i:i+3] == quote * 3:
+                        j = i + 3
+                        while j < len(line) - 2:
+                            if line[j:j+3] == quote * 3:
+                                j += 3
+                                break
+                            j += 1
+                        else:
+                            j = len(line)
+                        tokens.append(("string", line[i:j]))
+                        i = j
+                        continue
+                    # Single-quoted string
                     j = i + 1
                     while j < len(line):
-                        if line[j] == quote and (j == i + 1 or line[j-1] != "\\"):
+                        if line[j] == quote and line[j-1] != "\\":
                             j += 1
                             break
                         j += 1
@@ -162,9 +176,15 @@ class Syntax(Renderable):
                 is_highlighted = line_num in self.highlight_lines
                 line_style = ANSI.style_bold if is_highlighted else ANSI.style_dim
                 prefix = f"{line_style}{line_num:>{line_num_width}} │ {ANSI.color_reset}"
-                yield prefix + "".join(line)
+                rendered_line = prefix + "".join(line)
             else:
-                yield "".join(line)
+                rendered_line = "".join(line)
+            
+            if self.word_wrap and options.max_width > 0:
+                for wrapped in console._wrap_text(rendered_line, options.max_width).split("\n"):
+                    yield wrapped
+            else:
+                yield rendered_line
             
             line_num += 1
     
@@ -336,7 +356,8 @@ class Markdown(Renderable):
             
             elif elem_type == "code":
                 from ascii_colors.rich.content import Syntax
-                syntax = Syntax(content, lexer=content if content else "text", line_numbers=False)
+                lexer_name = level if isinstance(level, str) and level else "text"
+                syntax = Syntax(content, lexer=lexer_name, line_numbers=False)
                 for line in console.render(syntax, options):
                     yield line
                 prev_was_para = False
@@ -350,11 +371,12 @@ class Markdown(Renderable):
                     show_lines=False,
                     padding=(0, 1),
                 )
+                n_headers = len(table_data["headers"])
                 for row in table_data["rows"]:
-                    # Ensure row has same number of cells as headers
-                    while len(row) < len(table_data["headers"]):
-                        row.append("")
-                    table.add_row(*row)
+                    row_copy = list(row[:n_headers])
+                    while len(row_copy) < n_headers:
+                        row_copy.append("")
+                    table.add_row(*row_copy)
                 yield table
                 prev_was_para = False
     

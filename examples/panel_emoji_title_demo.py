@@ -48,10 +48,15 @@ def main() -> None:
         title=f"[bold blue]🛠️ Executing: a tool that is malformed[/bold blue]",
         border_style="blue"
     )
-    print("Here is a non return test",end="")
+    # Use ASCIIColors.print (not builtin print) so the library can track
+    # that we are mid-line, allowing the next panel to prepend a newline.
+    # The panel() convenience method handles the mid-line case itself by
+    # emitting a leading "\n" before handing off to the rich Console.
+    ASCIIColors.print("Here is a non return test", end="")
     ASCIIColors.panel(
         "The line preceding this panel doesn't provide a \\n",
         title="🚀 Testing a panel with no return",
     )
+    ASCIIColors.print("", end="\n")  # finalize the line
 if __name__ == "__main__":
     main()

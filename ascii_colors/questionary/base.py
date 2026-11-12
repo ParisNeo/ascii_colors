@@ -70,6 +70,7 @@ class Question:
         self.validate = validate
         self.style = style or {}
         self.kwargs = kwargs
+        self.name: Optional[str] = kwargs.get("name")
         self._answers: Dict[str, Any] = {}
         # Allow injecting input for testing
         self._input_source: Optional[Iterator[str]] = kwargs.get('input_source', None)

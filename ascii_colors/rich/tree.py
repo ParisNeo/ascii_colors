@@ -3,7 +3,7 @@
 Tree component for rich compatibility.
 """
 
-from typing import Iterator, Optional, Union, TYPE_CHECKING
+from typing import Iterator, List, Optional, Union, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ascii_colors.rich.console import Console, ConsoleOptions
@@ -67,18 +67,21 @@ class Tree(Renderable):
         guide_ansi = str(self.guide_style) if self.guide_style else ""
         reset = ANSI.color_reset
         
-        if isinstance(self.label, str):
-            label_str = self.label
-        elif isinstance(self.label, Text):
-            label_str = self.label.plain if isinstance(self.label.plain, str) else str(self.label.plain)
+        if isinstance(self.label, Text):
+            wrapped = self.label.wrap(options.max_width)
+            rendered_label = [line.render(options.max_width) for line in wrapped] if wrapped else [""]
+            label_str = rendered_label[0] if rendered_label else ""
         else:
             try:
                 rendered = list(console.render(self.label, options))
                 label_str = rendered[0] if rendered else str(self.label)
-            except:
+            except Exception:
                 label_str = str(self.label)
         
-        yield f"{style_ansi}{label_str}{reset}"
+        if style_ansi:
+            yield f"{style_ansi}{label_str}{reset}"
+        else:
+            yield f"{label_str}{reset}"
         
         for i, child in enumerate(self.children):
             is_last = i == len(self.children) - 1

@@ -15,20 +15,21 @@ class Form:
     
     def ask(self, patch_stdout: bool = False, kbi_msg: str = "Cancelled by user") -> Dict[str, Any]:
         """Ask all questions and return answers dict."""
+        from ascii_colors.core import ASCIIColors
+        from ascii_colors.utils import strip_ansi
+
         answers: Dict[str, Any] = {}
         try:
             for q in self.questions:
                 q._answers = answers
                 answer = q.ask(patch_stdout=patch_stdout, kbi_msg=kbi_msg)
-                if answer is None and isinstance(q, Confirm) and q.default is False:
-                    return answers
                 key = getattr(q, 'name', None) or q.message
-                # Strip rich markup from key for cleaner output
-                from ascii_colors.core import ASCIIColors
-                key = ASCIIColors._apply_rich_markup(key)
-                from ascii_colors.utils import strip_ansi
-                key = strip_ansi(key)
+                key = strip_ansi(ASCIIColors._apply_rich_markup(key))
                 answers[key] = answer
+                # Confirm gate (default=False): declining (False) or cancelling
+                # (Ctrl+C -> None) short-circuits the remaining questions.
+                if isinstance(q, Confirm) and q.default is False and not answer:
+                    return answers
             return answers
         except KeyboardInterrupt:
             print(f"\n{kbi_msg}")

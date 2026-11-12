@@ -8,6 +8,7 @@ import re
 import sys
 import time
 import shutil
+import threading
 from contextlib import contextmanager
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union, TextIO, Iterator
 
@@ -25,6 +26,90 @@ from ascii_colors.rich.text import Text, Renderable, wcswidth
 # Get builtin print to avoid conflicts
 import builtins
 _builtin_print = builtins.print
+
+_ANSI_STRIP_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
+_ANSI_TERM_CHARS = 'ABCDEFGHJKSTfmnsulh'
+
+# Box-drawing characters that indicate the start of a bordered renderable.
+# When such a line is emitted while the cursor is mid-line, a newline must be
+# prepended so the border aligns at column 0.
+_BOX_LEFT_CHARS = (
+    "┌", "╭", "╔", "┏", "╓", "╒", "┍", "┎",   # top-left corners
+    "├", "╠", "┣", "╟", "┝",                    # left T-junctions
+    "└", "╰", "╚", "┗", "╙", "╘", "┕", "┖",   # bottom-left corners
+)
+
+
+def _iter_ansi_aware(text: str):
+    """Yield (is_ansi, fragment) — splits ANSI escape sequences from text."""
+    i = 0
+    n = len(text)
+    while i < n:
+        if text[i:i+2] in ('\x1b[', '\033['):
+            j = i + 2
+            while j < n and text[j] not in _ANSI_TERM_CHARS:
+                j += 1
+            if j < n:
+                j += 1
+            yield (True, text[i:j])
+            i = j
+        else:
+            yield (False, text[i])
+            i += 1
+
+
+def _wrap_preserving_ansi(line: str, max_width: int) -> List[str]:
+    """Wrap a line to fit max_width, preserving active ANSI SGR state across lines."""
+    if not line:
+        return [""]
+    if len(_ANSI_STRIP_RE.sub("", line)) <= max_width:
+        return [line]
+
+    lines: List[str] = []
+    active_codes: List[str] = []
+    current_parts: List[str] = []
+    visual = 0
+    for is_ansi, frag in _iter_ansi_aware(line):
+        if is_ansi:
+            current_parts.append(frag)
+            if frag.endswith('m'):
+                params = frag[2:-1]
+                if params in ('', '0'):
+                    active_codes.clear()
+                else:
+                    active_codes.append(frag)
+        else:
+            if visual + 1 > max_width and visual > 0:
+                lines.append("".join(current_parts))
+                current_parts = list(active_codes)
+                visual = 0
+            current_parts.append(frag)
+            visual += 1
+    if current_parts:
+        lines.append("".join(current_parts))
+    return lines or [""]
+
+
+def _truncate_preserving_ansi(line: str, max_width: int, ellipsis: str = "\u2026") -> str:
+    """Truncate to max_width visual cells, preserving ANSI sequences, appending ellipsis."""
+    if max_width <= 0:
+        return ""
+    if len(_ANSI_STRIP_RE.sub("", line)) <= max_width:
+        return line
+    target = max(max_width - 1, 0)
+    parts: List[str] = []
+    visual = 0
+    for is_ansi, frag in _iter_ansi_aware(line):
+        if is_ansi:
+            parts.append(frag)
+        else:
+            if visual >= target:
+                break
+            parts.append(frag)
+            visual += 1
+    parts.append(ellipsis)
+    parts.append("\x1b[0m")
+    return "".join(parts)
 
 
 class ConsoleOptions:
@@ -176,7 +261,7 @@ class Console:
         highlighter: Optional[Any] = None,
         legacy_windows: Optional[bool] = None,
         safe_box: bool = True,
-        get_environ: Callable[[str], Any] = lambda x: None,
+        get_environ: Callable[[str], Any] = lambda x: os.environ.get(x),
         get_time: Optional[Callable[[], float]] = None,
         get_terminal_size: Optional[Callable[[], Tuple[int, int]]] = None,
     ):
@@ -187,8 +272,10 @@ class Console:
         self.force_jupyter = force_jupyter
         self.no_color = no_color
         self.tab_size = tab_size
-        self.record = record
-        self._record_buffer: List[str] = []
+        self._record_local = threading.local()
+        self._record_local.buffer = []
+        self._record_local.record = record
+        self._output_lock = threading.RLock()
         self.markup = markup
         self.emoji = emoji
         self.emoji_variant = emoji_variant
@@ -207,6 +294,52 @@ class Console:
         self._is_jupyter = self._detect_jupyter()
         self._color_system: Optional[str] = self._detect_color_system()
     
+    @property
+    def record(self) -> bool:
+        return getattr(self._record_local, 'record', False)
+
+    @record.setter
+    def record(self, value: bool) -> None:
+        self._record_local.record = value
+
+    @property
+    def _record_buffer(self) -> List[str]:
+        if not hasattr(self._record_local, 'buffer'):
+            self._record_local.buffer = []
+        return self._record_local.buffer
+
+    @_record_buffer.setter
+    def _record_buffer(self, value: List[str]) -> None:
+        self._record_local.buffer = value
+
+    def _write(self, text: str, end: str = "\n", flush: bool = False) -> None:
+        """Write text to the console stream and keep the shared line-start
+        state in sync so subsequent renderables know whether they are mid-line."""
+        _builtin_print(text, end=end, file=self.file, flush=flush)
+        from ascii_colors.core import ASCIIColors
+        if end:
+            ASCIIColors._set_at_line_start(end.endswith("\n"))
+        else:
+            visible = _ANSI_STRIP_RE.sub("", text)
+            if visible:
+                ASCIIColors._set_at_line_start(visible.endswith("\n"))
+
+    def _ensure_line_start_for(self, first_line: str) -> None:
+        """Prepend a newline before a bordered renderable if the cursor is
+        currently mid-line. This prevents box-drawing output from being glued
+        onto the tail of a previous ``end=''`` write."""
+        if not first_line:
+            return
+        from ascii_colors.core import ASCIIColors
+        if ASCIIColors._get_at_line_start():
+            return
+        first_plain = _ANSI_STRIP_RE.sub("", first_line).lstrip()
+        if first_plain.startswith(_BOX_LEFT_CHARS):
+            _builtin_print("", file=self.file)
+            ASCIIColors._set_at_line_start(True)
+            if self.record:
+                self._record_buffer.append("\n")
+
     def _default_get_terminal_size(self) -> Tuple[int, int]:
         """Default terminal size getter."""
         try:
@@ -297,8 +430,7 @@ class Console:
         return (self.width, self.height)
     
     def _process_emoji(self, text: str) -> str:
-        if not self.emoji:
-            return re.sub(r":[\w_]+:", "", text)
+        # Emoji resolution is not implemented; leave codes as-is. Never delete them.
         return text
     
     def _expand_tabs(self, text: str) -> str:
@@ -487,7 +619,12 @@ class Console:
         
         return str(renderable).split("\n")
     
-    def print(
+    def print(self, *objects, **kwargs):
+        """Print objects to the console (thread-safe)."""
+        with self._output_lock:
+            self._print_impl(*objects, **kwargs)
+
+    def _print_impl(
         self,
         *objects,
         sep=" ",
@@ -504,14 +641,14 @@ class Console:
         soft_wrap=False,
         flush=False,
     ):
-        """Print objects to the console."""
+        """Print objects to the console (implementation, called under lock)."""
         use_emoji = emoji if emoji is not None else self.emoji
         use_markup = markup if markup is not None else self.markup
         use_highlight = highlight if highlight is not None else self.highlight
         
         for i, obj in enumerate(objects):
             if i > 0:
-                _builtin_print(sep, end="", file=self.file)
+                self._write(sep, end="")
             
             obj_type = type(obj).__name__
             
@@ -520,12 +657,14 @@ class Console:
                 options = ConsoleOptions(max_width=max_width)
                 try:
                     lines = self.render(obj, options)
+                    if lines:
+                        self._ensure_line_start_for(lines[0])
                     for line in lines:
-                        _builtin_print(line, file=self.file)
+                        self._write(line)
                         if self.record:
                             self._record_buffer.append(line + "\n")
                 except Exception as e:
-                    _builtin_print(f"[Error rendering {obj_type}: {e}]", file=self.file)
+                    self._write(f"[Error rendering {obj_type}: {e}]")
                     
             elif isinstance(obj, str):
                 output = obj
@@ -548,7 +687,8 @@ class Console:
                     style_obj = style if isinstance(style, Style) else Style.parse(style)
                     output = f"{style_obj}{output}{ANSI.color_reset}"
                 
-                _builtin_print(output, end="", file=self.file)
+                self._ensure_line_start_for(output)
+                self._write(output, end="")
                 if self.record:
                     self._record_buffer.append(output)
                     
@@ -573,7 +713,8 @@ class Console:
                     style_obj = style if isinstance(style, Style) else Style.parse(style)
                     output = f"{style_obj}{output}{ANSI.color_reset}"
                 
-                _builtin_print(output, end="", file=self.file)
+                self._ensure_line_start_for(output)
+                self._write(output, end="")
                 if self.record:
                     self._record_buffer.append(output)
                     
@@ -582,24 +723,31 @@ class Console:
                 options = ConsoleOptions(max_width=max_width)
                 try:
                     lines = self.render(obj, options)
+                    if lines:
+                        self._ensure_line_start_for(lines[0])
                     for line in lines:
-                        _builtin_print(line, file=self.file)
+                        self._write(line)
                         if self.record:
                             self._record_buffer.append(line + "\n")
                 except Exception as e:
-                    _builtin_print(f"[Error rendering {obj_type}: {e}] {str(obj)}", file=self.file)
+                    self._write(f"[Error rendering {obj_type}: {e}] {str(obj)}")
                     
             else:
                 output = str(obj)
-                _builtin_print(output, end="", file=self.file)
+                self._write(output, end="")
                 if self.record:
                     self._record_buffer.append(output)
         
-        _builtin_print(end, end="", file=self.file, flush=flush)
+        self._write(end, end="", flush=flush)
         if self.record:
             self._record_buffer.append(end)
     
-    def log(
+    def log(self, *objects, **kwargs):
+        """Log to console with timestamp (thread-safe)."""
+        with self._output_lock:
+            self._log_impl(*objects, **kwargs)
+
+    def _log_impl(
         self,
         *objects,
         sep=" ",
@@ -610,7 +758,7 @@ class Console:
         markup=None,
         highlight=None,
     ):
-        """Log to console with timestamp."""
+        """Log to console with timestamp (implementation, called under lock)."""
         import datetime
         
         use_emoji = emoji if emoji is not None else self.emoji
@@ -657,34 +805,36 @@ class Console:
             style_obj = style if isinstance(style, Style) else Style.parse(style)
             log_line = f"{style_obj}{log_line}{ANSI.color_reset}"
         
-        _builtin_print(log_line, end=end, file=self.file)
+        self._ensure_line_start_for(log_line)
+        self._write(log_line, end=end)
         
         if self.record:
             self._record_buffer.append(log_line + end)
     
     def _wrap_text(self, text, max_width, overflow=None, soft_wrap=False, crop=True):
-        """Wrap text to fit within max_width."""
-        lines = text.split("\n")
-        wrapped_lines = []
-        
-        for line in lines:
-            if len(line) <= max_width:
-                wrapped_lines.append(line)
-                continue
-            
-            if overflow == "ellipsis" and crop:
-                wrapped_lines.append(line[:max_width-1] + "…")
-            elif overflow == "ignore":
-                wrapped_lines.append(line)
-            else:
-                if soft_wrap:
+            """Wrap text to fit within max_width, preserving ANSI escape codes."""
+            if not max_width or max_width <= 0:
+                return text
+            lines = text.split("\n")
+            wrapped_lines: List[str] = []
+            for line in lines:
+                plain = _ANSI_STRIP_RE.sub("", line)
+                if len(plain) <= max_width:
+                    wrapped_lines.append(line)
+                    continue
+                if overflow == "ellipsis" and crop:
+                    wrapped_lines.append(_truncate_preserving_ansi(line, max_width))
+                elif overflow == "ignore":
+                    wrapped_lines.append(line)
+                elif '\x1b[' in line or '\033[' in line:
+                    wrapped_lines.extend(_wrap_preserving_ansi(line, max_width))
+                elif soft_wrap:
                     for i in range(0, len(line), max_width):
-                        wrapped_lines.append(line[i:i+max_width])
+                        wrapped_lines.append(line[i:i + max_width])
                 else:
                     import textwrap
-                    wrapped_lines.extend(textwrap.wrap(line, width=max_width))
-        
-        return "\n".join(wrapped_lines)
+                    wrapped_lines.extend(textwrap.wrap(line, width=max_width) or [""])
+            return "\n".join(wrapped_lines)
     
     def _justify_text(self, text, width, justify):
         """Justify text within the given width."""
@@ -782,7 +932,9 @@ class Console:
             if style_ansi:
                 line = f"{style_ansi}{line}{ANSI.color_reset}"
         
-        _builtin_print(line, file=self.file)
+        with self._output_lock:
+            self._ensure_line_start_for(line)
+            self._write(line)
     
     def input(
         self,
@@ -800,13 +952,19 @@ class Console:
         if stream is None:
             stream = self.file
         
-        _builtin_print(prompt, end="", file=stream)
+        with self._output_lock:
+            self._write(prompt, end="")
         
         if password:
             import getpass
-            return getpass.getpass("")
+            result = getpass.getpass("")
         else:
-            return input()
+            result = input()
+
+        # After the user presses Enter, the cursor is at column 0.
+        from ascii_colors.core import ASCIIColors
+        ASCIIColors._set_at_line_start(True)
+        return result
     
     def export_text(self, clear=True, styles=False) -> str:
         """Export recorded output as text."""

@@ -15,16 +15,49 @@ from ascii_colors.rich.style import Style as StyleClass, Color
 
 # Try to import wcwidth for better Unicode handling
 try:
-    from wcwidth import wcswidth, wcwidth as wcwidth_func
+    from wcwidth import wcwidth as _wcw
     _HAS_WCWIDTH = True
 except ImportError:
+    _wcw = None  # type: ignore[assignment]
     _HAS_WCWIDTH = False
-    def wcswidth(s: str) -> int:
-        """Fallback wcswidth that approximates width."""
-        return sum(2 if ord(c) > 127 else 1 for c in s)
-    def wcwidth_func(c: str) -> int:
-        """Fallback wcwidth."""
-        return 2 if ord(c) > 127 else 1
+
+# Variation selectors (VS15 / VS16) and zero-width joiners must never
+# contribute to display width. Some ``wcwidth`` versions and the naive
+# fallback count ``\ufe0f`` (VS16) as a full-width character, which makes
+# emoji like ``🛠️`` (U+1F6E0 U+FE0F) look 4 cells wide instead of 2.
+# That is the root cause of misaligned panel top-borders when a title
+# contains an emoji with a variation selector.
+_VARIATION_SELECTORS = frozenset((0xFE0E, 0xFE0F))
+_ZERO_WIDTH_CHARS = frozenset((0x200B, 0x200C, 0x200D))
+_COMBINING_RANGES = ((0x0300, 0x036F),)
+
+
+def wcwidth_func(c: str) -> int:
+    """Display width of a single character (emoji-aware)."""
+    if not c:
+        return 0
+    cp = ord(c)
+    if cp in _VARIATION_SELECTORS or cp in _ZERO_WIDTH_CHARS:
+        return 0
+    for lo, hi in _COMBINING_RANGES:
+        if lo <= cp <= hi:
+            return 0
+    if _wcw is not None:
+        try:
+            w = _wcw(c)
+            if w < 0:
+                return 0
+            return w
+        except (TypeError, ValueError):
+            pass
+    return 2 if cp > 127 else 1
+
+
+def wcswidth(s: str) -> int:
+    """Display width of a string (ANSI-stripped, emoji-aware)."""
+    if not s:
+        return 0
+    return sum(wcwidth_func(c) for c in s)
 
 
 class Renderable(ABC):

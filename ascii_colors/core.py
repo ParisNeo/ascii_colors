@@ -21,7 +21,113 @@ class ASCIIColors(ANSI):
     _handler_lock: Lock = Lock()
     _basicConfig_called: bool = False
     _context: threading.local = threading.local()
-    _at_line_start: bool = True
+    _internal_state: threading.local = threading.local()
+    _at_line_start: bool = True  # Deprecated: use _get_at_line_start() / _set_at_line_start()
+
+    @classmethod
+    def _get_at_line_start(cls) -> bool:
+        # Use a plain class attribute as the source of truth. The
+        # ``threading.local`` copy is kept in sync for backward
+        # compatibility, but we deliberately do NOT read from it:
+        # if ``print()`` and ``panel()`` are dispatched on different
+        # threads (test harnesses, IDEs, certain terminal wrappers),
+        # the per-thread default of ``True`` would silently hide the
+        # real mid-line state and cause panels to be glued onto the
+        # preceding text. The plain attribute is deterministic.
+        return cls._at_line_start
+
+    @classmethod
+    def _set_at_line_start(cls, value: bool) -> None:
+        cls._at_line_start = value
+        try:
+            cls._internal_state.at_line_start = value
+        except Exception:
+            pass
+
+    @classmethod
+    def _ensure_line_break_before_box(cls, file: Any = None) -> None:
+        """Emit a newline to ``file`` (or ``sys.stdout``) if the cursor is
+        currently mid-line.
+
+        Kept for backward compatibility; new code should use
+        :meth:`_render_to_stdout` which handles ordering atomically.
+        """
+        target = file if file is not None else sys.stdout
+        if cls._get_at_line_start():
+            return
+        try:
+            target.write("\n")
+            if hasattr(target, "flush"):
+                target.flush()
+        except Exception:
+            pass
+        cls._set_at_line_start(True)
+
+    @staticmethod
+    def _render_to_stdout(renderable: Any, width: int) -> str:
+        """Render a rich renderable to ``sys.stdout`` with correct
+        mid-line handling, atomically.
+
+        The Console writes to an internal ``io.StringIO`` buffer so that
+        nothing reaches ``sys.stdout`` during rendering. The mid-line
+        check is evaluated exactly once, immediately before we emit to
+        stdout, so it cannot be affected by ``Console.__init__``,
+        ``capture()``, or ``render()`` mutating the shared state.
+
+        Returns the rendered string (with trailing newline stripped).
+        """
+        import io
+        from ascii_colors.rich import Console
+
+        # Snapshot the shared mid-line state BEFORE rendering. The inner
+        # Console mutates this state during rendering (via
+        # _ensure_line_start_for / _write), which would otherwise corrupt
+        # the decision below.
+        was_at_line_start = ASCIIColors._get_at_line_start()
+
+        # Emit the leading newline BEFORE rendering, and flush it
+        # immediately. Writing it first means ordering with any preceding
+        # output (e.g. ``print(..., end="")``) is guaranteed even if the
+        # rendering path mutates shared state or buffers.
+        try:
+            sys.stdout.flush()
+        except Exception:
+            pass
+        if not was_at_line_start:
+            # Use explicit CR+LF rather than a bare LF. On Windows the
+            # text-mode translation of ``\n`` to ``os.linesep`` is not
+            # reliable inside every terminal wrapper / IDE shell — using
+            # ``\r\n`` directly guarantees the cursor returns to column 0
+            # *and* advances one line, so the panel is never glued onto
+            # the tail of a previous ``end=''`` write. On POSIX this is
+            # the standard "return to col 0, next line" sequence.
+            sys.stdout.write("\r\n")
+            try:
+                sys.stdout.flush()
+            except Exception:
+                pass
+
+        # While rendering into the capture buffer, force the state to
+        # True so the inner Console does not inject a stray leading
+        # newline into the captured string.
+        ASCIIColors._set_at_line_start(True)
+        try:
+            buffer = io.StringIO()
+            console = Console(width=width, force_terminal=False, file=buffer)
+            with console.capture() as capture:
+                console.print(renderable)
+            rendered = capture.get().rstrip("\n")
+        finally:
+            ASCIIColors._set_at_line_start(True)
+
+        sys.stdout.write(rendered)
+        sys.stdout.write("\n")
+        try:
+            sys.stdout.flush()
+        except Exception:
+            pass
+
+        return rendered
 
     _level_colors: Dict[LogLevel, str] = {
         LogLevel.DEBUG: ANSI.style_dim + ANSI.color_white,
@@ -92,7 +198,13 @@ class ASCIIColors(ANSI):
         
         if level < cls._global_level: return
         ts = datetime.now()
-        final_msg = message
+        if args:
+            try:
+                final_msg = message % args
+            except (TypeError, ValueError):
+                final_msg = message
+        else:
+            final_msg = message
         
         final_exc = None
         if exc_info:
@@ -131,7 +243,7 @@ class ASCIIColors(ANSI):
             return text
 
     @staticmethod
-    def print(text: str, color: str = ANSI.color_white, style: str = "", background: str = "", end: str = "\n", flush: bool = False, file: Any = sys.stdout, emit: bool = True, markup: bool = True) -> str:
+    def print(text: str, color: str = ANSI.color_white, style: str = "", background: str = "", end: str = "\n", flush: bool = False, file: Any = None, emit: bool = True, markup: bool = True) -> str:
         """
         Print text with optional rich markup support.
         
@@ -142,25 +254,35 @@ class ASCIIColors(ANSI):
             background: Background color ANSI code
             end: String to append at the end
             flush: Whether to flush the output
-            file: Output stream
+            file: Output stream (defaults to the current ``sys.stdout``)
             emit: Whether to actually print (False returns string only)
             markup: Whether to parse rich markup tags like [red], [bold], etc.
         """
+        if file is None:
+            file = sys.stdout
         processed_text = text
         if markup:
             processed_text = ASCIIColors._apply_rich_markup(text)
 
-        if not ASCIIColors._at_line_start:
-            stripped = processed_text.lstrip()
-            if stripped.startswith(("┌", "╭", "╔", "┏", "╓", "╒", "┍", "┎")):
+        if not ASCIIColors._get_at_line_start():
+            stripped = strip_ansi(processed_text).lstrip()
+            if stripped.startswith(("┌", "╭", "╔", "┏", "╓", "╒", "┍", "┎",
+                                    "├", "╠", "┣", "└", "╰", "╚", "┗")):
                 file.write("\n")
 
         out = f"{style}{background}{color}{processed_text}{ANSI.color_reset}{end}"
         if emit: 
             file.write(out)
-            if flush:
-                file.flush()
-            ASCIIColors._at_line_start = end.endswith('\n')
+            # When the caller suppresses the trailing newline, flush
+            # immediately so the buffered text is definitely visible to
+            # the OS/terminal before the next library operation decides
+            # whether a leading newline is required.
+            if flush or not end.endswith('\n'):
+                try:
+                    file.flush()
+                except Exception:
+                    pass
+            ASCIIColors._set_at_line_start(end.endswith('\n'))
         return out
 
     @staticmethod
@@ -221,7 +343,7 @@ class ASCIIColors(ANSI):
         file.write(out)
         if flush:
             file.flush()
-        ASCIIColors._at_line_start = end.endswith('\n')
+        ASCIIColors._set_at_line_start(end.endswith('\n'))
 
     @staticmethod
     def highlight(text: str, subtext: Union[str, List[str]], color: str = ANSI.color_white, highlight_color: str = ANSI.color_yellow, whole_line: bool = False, end: str = "\n", flush: bool = False, file: Any = sys.stdout, markup: bool = False) -> None:
@@ -278,7 +400,7 @@ class ASCIIColors(ANSI):
         file.write(out + end)
         if flush:
             file.flush()
-        ASCIIColors._at_line_start = end.endswith('\n')
+        ASCIIColors._set_at_line_start(end.endswith('\n'))
 
     @staticmethod
     def execute_with_animation(pending_text: str, func: Callable[..., _T], *args: Any, color: Optional[str] = None, **kwargs: Any) -> _T:
@@ -336,7 +458,6 @@ class ASCIIColors(ANSI):
                 if c == '' and default_yes is not None: return default_yes
                 ASCIIColors.print("Invalid input.", color=ASCIIColors.color_red, file=file)
             except KeyboardInterrupt: return False
-        ASCIIColors._at_line_start = True
 
     @staticmethod
     def prompt(text: str, color: str = ANSI.color_green, style: str = "", hide_input: bool = False, file: Any = sys.stdout, markup: bool = True) -> str:
@@ -359,21 +480,25 @@ class ASCIIColors(ANSI):
             if style or color:
                 processed_text = ASCIIColors._apply_rich_markup(text)
                 prompt_text = f"{style}{color}{processed_text}{ANSI.color_reset}"
-                return console.input(prompt_text, markup=False, password=hide_input)
+                result = console.input(prompt_text, markup=False, password=hide_input)
+                ASCIIColors._set_at_line_start(True)
+                return result
             
-            return console.input(text, markup=True, password=hide_input)
+            result = console.input(text, markup=True, password=hide_input)
+            ASCIIColors._set_at_line_start(True)
+            return result
 
         full = f"{style}{color}{text}{ANSI.color_reset}"
         try:
             file.write(full)
             file.flush()
             result = getpass.getpass(prompt="") if hide_input else input()
-            ASCIIColors._at_line_start = True
+            ASCIIColors._set_at_line_start(True)
             return result
         except KeyboardInterrupt: 
             file.write("\n")
             file.flush()
-            ASCIIColors._at_line_start = True
+            ASCIIColors._set_at_line_start(True)
             return ""
 
     @staticmethod
@@ -412,7 +537,7 @@ class ASCIIColors(ANSI):
 
         New rich-style convenience method.
         """
-        from ascii_colors.rich import Panel, BoxStyle, Style, Console, Text
+        from ascii_colors.rich import Panel, BoxStyle, Style, Text
         import re
 
         def format_dict(d: dict, indent: int = 0) -> str:
@@ -507,11 +632,7 @@ class ASCIIColors(ANSI):
         else:
             console_width = ASCIIColors._get_terminal_width()
 
-        console = Console(width=console_width, force_terminal=False)
-        with console.capture() as capture:
-            console.print(panel)
-
-        return capture.get().rstrip('\n')
+        return ASCIIColors._render_to_stdout(panel, console_width)
 
     @staticmethod
     def table(
@@ -562,11 +683,7 @@ class ASCIIColors(ANSI):
         term_width = ASCIIColors._get_terminal_width()
         table_width = min(term_width - 4, 120)
 
-        console = Console(width=table_width, force_terminal=False)
-        with console.capture() as capture:
-            console.print(table)
-
-        return capture.get().rstrip('\n')
+        return ASCIIColors._render_to_stdout(table, table_width)
 
     @staticmethod
     def tree(
@@ -611,11 +728,7 @@ class ASCIIColors(ANSI):
         )
         
         term_width = ASCIIColors._get_terminal_width()
-        console = Console(width=min(term_width - 4, 120), force_terminal=False)
-        with console.capture() as capture:
-            console.print(syntax)
-
-        return capture.get().rstrip('\n')
+        return ASCIIColors._render_to_stdout(syntax, min(term_width - 4, 120))
 
     @staticmethod
     def markdown(markup: str) -> str:
@@ -631,11 +744,7 @@ class ASCIIColors(ANSI):
         md = Markdown(processed_markup)
         
         term_width = ASCIIColors._get_terminal_width()
-        console = Console(width=min(term_width - 4, 100), force_terminal=False)
-        with console.capture() as capture:
-            console.print(md)
-
-        return capture.get().rstrip('\n')
+        return ASCIIColors._render_to_stdout(md, min(term_width - 4, 100))
 
     @staticmethod
     def columns(
@@ -655,11 +764,7 @@ class ASCIIColors(ANSI):
         
         term_width = ASCIIColors._get_terminal_width()
         col_width = width or min(term_width - 4, 100)
-        console = Console(width=col_width, force_terminal=False)
-        with console.capture() as capture:
-            console.print(cols)
-
-        return capture.get().rstrip('\n')
+        return ASCIIColors._render_to_stdout(cols, col_width)
 
     @staticmethod
     def rule(

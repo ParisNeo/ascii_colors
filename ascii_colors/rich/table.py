@@ -13,6 +13,43 @@ from ascii_colors.constants import ANSI
 from ascii_colors.rich.style import Style, BoxStyle
 from ascii_colors.rich.text import Text, Renderable, wcswidth
 
+_ANSI_TERM = 'ABCDEFGHJKSTfmnsulh'
+_ANSI_STRIP = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
+
+
+def _truncate_ansi(text: str, max_width: int) -> str:
+    """Truncate text to max_width visual cells, preserving ANSI sequences."""
+    if max_width <= 0:
+        return ""
+    plain = _ANSI_STRIP.sub("", text)
+    if wcswidth(plain) <= max_width:
+        return text
+    parts = []
+    visual = 0
+    i = 0
+    n = len(text)
+    while i < n and visual < max_width:
+        if text[i:i+2] in ('\x1b[', '\033['):
+            j = i + 2
+            while j < n and text[j] not in _ANSI_TERM:
+                j += 1
+            if j < n:
+                j += 1
+            parts.append(text[i:j])
+            i = j
+        else:
+            ch = text[i]
+            cw = wcswidth(ch)
+            if cw <= 0:
+                cw = 1
+            if visual + cw > max_width:
+                break
+            parts.append(ch)
+            visual += cw
+            i += 1
+    parts.append(ANSI.color_reset)
+    return "".join(parts)
+
 
 class Column:
     """Configuration for a table column."""
@@ -139,6 +176,13 @@ class Table(Renderable):
             return
 
         pad_y, pad_x = self._normalize_padding(self.padding)
+        # Clamp pad_x so that per-column padding cannot force the table past max_width
+        if max_width > 0 and col_count > 0:
+            if chars:
+                per_col_budget = max(1, (max_width - (col_count + 1)) // col_count)
+            else:
+                per_col_budget = max(1, max_width // col_count)
+            pad_x = min(pad_x, max(0, (per_col_budget - 1) // 2))
         col_widths = [0] * col_count
 
         # Check explicit column widths first
@@ -172,7 +216,12 @@ class Table(Renderable):
             col_widths[i] += pad_x * 2
 
         # Calculate total table width
-        border_count = (col_count + 1) if chars else (col_count - 1 if col_count > 1 else 0)
+        # With a box: col_count+1 vertical separators.
+        # Without a box: cells are joined by pad_x spaces each.
+        if chars:
+            border_count = col_count + 1
+        else:
+            border_count = pad_x * (col_count - 1) if col_count > 1 else 0
         total_width = sum(col_widths) + border_count
 
         # Expand or shrink to fit
@@ -186,12 +235,25 @@ class Table(Renderable):
         if total_width > max_width:
             available = max_width - border_count
             if available > 0:
-                total_content = sum(w - pad_x * 2 for w in col_widths)
+                total_content = sum(max(0, w - pad_x * 2) for w in col_widths)
                 if total_content > 0:
                     for i in range(col_count):
-                        content_width = col_widths[i] - pad_x * 2
+                        content_width = max(0, col_widths[i] - pad_x * 2)
                         new_content = max(1, (available * content_width) // total_content)
                         col_widths[i] = new_content + pad_x * 2
+            total_width = sum(col_widths) + border_count
+
+        # Final hard-fit guarantee: never exceed max_width, even with awkward padding
+        if total_width > max_width:
+            excess = total_width - max_width
+            for i in range(col_count - 1, -1, -1):
+                if excess <= 0:
+                    break
+                min_col = 1 + pad_x * 2
+                reducible = max(0, col_widths[i] - min_col)
+                take = min(excess, reducible)
+                col_widths[i] -= take
+                excess -= take
             total_width = sum(col_widths) + border_count
 
         border_ansi = str(self.border_style) if self.border_style else ""
@@ -226,19 +288,23 @@ class Table(Renderable):
                 plain_h = re.sub(r"\x1b\[[0-9;]*m", "", h)
                 content_width = w - pad_x * 2
                 text_width = wcswidth(plain_h)
+                if text_width > content_width:
+                    h = _truncate_ansi(h, content_width)
+                    plain_h = re.sub(r"\x1b\[[0-9;]*m", "", h)
+                    text_width = wcswidth(plain_h)
 
                 if col_def.justify == "right":
-                    left_pad = content_width - text_width
+                    left_pad = max(0, content_width - text_width)
                     right_pad = 0
                 elif col_def.justify == "center":
-                    left_pad = (content_width - text_width) // 2
-                    right_pad = content_width - text_width - left_pad
+                    left_pad = max(0, (content_width - text_width) // 2)
+                    right_pad = max(0, content_width - text_width - left_pad)
                 else:  # left
                     left_pad = 0
-                    right_pad = content_width - text_width
+                    right_pad = max(0, content_width - text_width)
 
                 cell_content = f"{' ' * pad_x}{' ' * left_pad}{h}{' ' * right_pad}{' ' * pad_x}"
-                parts.append(f"{header_ansi}{cell_content}{reset}{border_ansi if chars else ''}")
+                parts.append(f"{reset}{header_ansi}{cell_content}{reset}{border_ansi if chars else ''}")
                 if chars:
                     parts.append(chars["vertical"])
                 elif i < col_count - 1:
@@ -276,25 +342,29 @@ class Table(Renderable):
                 plain_cell = re.sub(r"\x1b\[[0-9;]*m", "", cell)
                 content_width = w - pad_x * 2
                 text_width = wcswidth(plain_cell)
+                if text_width > content_width:
+                    cell = _truncate_ansi(cell, content_width)
+                    plain_cell = re.sub(r"\x1b\[[0-9;]*m", "", cell)
+                    text_width = wcswidth(plain_cell)
 
                 if col_def.justify == "right":
-                    left_pad = content_width - text_width
+                    left_pad = max(0, content_width - text_width)
                     right_pad = 0
                 elif col_def.justify == "center":
-                    left_pad = (content_width - text_width) // 2
-                    right_pad = content_width - text_width - left_pad
+                    left_pad = max(0, (content_width - text_width) // 2)
+                    right_pad = max(0, content_width - text_width - left_pad)
                 else:  # left
                     left_pad = 0
-                    right_pad = content_width - text_width
+                    right_pad = max(0, content_width - text_width)
 
                 combined_style = f"{row_ansi}{col_ansi}"
 
                 if combined_style:
                     cell_content = f"{' ' * pad_x}{' ' * left_pad}{cell}{reset}{' ' * right_pad}{' ' * pad_x}"
-                    parts.append(f"{combined_style}{cell_content}{border_ansi if chars else ''}")
+                    parts.append(f"{reset}{combined_style}{cell_content}{border_ansi if chars else ''}")
                 else:
                     cell_content = f"{' ' * pad_x}{' ' * left_pad}{cell}{' ' * right_pad}{' ' * pad_x}"
-                    parts.append(f"{cell_content}{border_ansi if chars else ''}")
+                    parts.append(f"{reset}{cell_content}{border_ansi if chars else ''}")
 
                 if chars:
                     parts.append(chars["vertical"])
