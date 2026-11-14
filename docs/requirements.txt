@@ -1,0 +1,7 @@
+# Documentation build dependencies for ascii_colors.
+# Install with:  pip install -r docs/requirements.txt
+sphinx>=4.0
+furo
+myst-parser
+sphinx_copybutton
+toml

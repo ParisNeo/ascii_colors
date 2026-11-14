@@ -59,6 +59,7 @@ Quick Start
    rich_integration
    interactive_prompts
    api
+   tui
 
 Features
 --------

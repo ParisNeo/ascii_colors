@@ -1,0 +1,12 @@
+/* Custom styling for the ascii_colors documentation. */
+
+.sidebar-brand-text {
+    font-weight: 700;
+    letter-spacing: 0.02em;
+}
+
+/* Slightly tighter spacing for generated API signatures. */
+dl.py.function > dt,
+dl.py.class > dt {
+    padding-top: 0.4rem;
+}

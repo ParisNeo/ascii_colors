@@ -6,9 +6,9 @@
 [![PyPI downloads](https://img.shields.io/pypi/dm/ascii_colors.svg)](https://pypi.org/project/ascii-colors/)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
-> **One library. Colors. Logging. Progress. Menus. Prompts. Panels. Tables. Done.**
+> **One library. Colors. Logging. Progress. Menus. Prompts. Panels. Tables. Full-Screen TUIs. Done.**
 
-Stop wrestling with multiple CLI libraries. **ASCIIColors** unifies everything you need for modern terminal applications into a single, elegant toolkit — from quick colored output to production-grade logging, interactive menus, smart prompts, and rich UI components.
+Stop wrestling with multiple CLI libraries. **ASCIIColors** unifies everything you need for modern terminal applications into a single, elegant toolkit — from quick colored output to production-grade logging, interactive menus, smart prompts, rich UI components, and even full-screen TUI applications.
 
 | 🎨 **Colors & Styles** | 🪵 **Logging System** | 📊 **Progress Bars** |
 |:---|:---|:---|
@@ -17,6 +17,10 @@ Stop wrestling with multiple CLI libraries. **ASCIIColors** unifies everything y
 | 🖥️ **Rich Components** | ❓ **Smart Prompts** | 🛠️ **Utilities** |
 |:---|:---|:---|
 | Panels, tables, trees, syntax highlighting, live displays, markdown | Drop-in `questionary` replacement: text, password, confirm, select, checkbox, autocomplete | Spinners, syntax highlighting, enhanced tracebacks with locals, multicolor text, confirm/prompt helpers |
+
+| 🖼️ **TUI Framework** | 🎯 **Focus & Modals** | 📊 **Live Charts** |
+|:---|:---|:---|
+| Full-screen apps with `App`, `Box`, `VBox`, `HBox`, `ListBox`, `TextInput`, `Table`, `Tabs` | `Tab` navigation, `push_modal` / `pop_modal`, per-widget key dispatch | `Sparkline`, `BarChart`, `BigValue`, `Spinner`, `ProgressBar` |
 
 ---
 
@@ -1187,6 +1191,156 @@ ASCIIColors.highlight(
     highlight_color=ASCIIColors.color_bright_red
 )
 ```
+
+---
+
+### 🖼️ TUI Framework — Full-Screen Terminal Apps
+
+ASCII Colors ships with a lightweight **curses-style TUI framework** (`ascii_colors.tui`) that turns any console into a full-screen, event-driven application — with **no external dependencies**.
+
+- **Diff-based rendering** — only the rows that actually changed are repainted, keeping the terminal flicker-free at 60+ FPS.
+- **Alternate screen buffer** — takes over the terminal cleanly and restores it on exit (including on exceptions).
+- **Background render thread** — animations keep running smoothly while the main thread blocks on keyboard input.
+- **Focus & keyboard handling** — `Tab` / `Shift+Tab` cycle between widgets; each widget dispatches its own keys via `handle_key()`.
+- **Modal overlays** — `app.push_modal(...)` centers a widget above everything and restricts focus to it.
+- **Wide-character aware** — emoji, CJK characters, and combining marks render correctly.
+
+#### Quick Start
+
+```python
+from ascii_colors.tui import (
+    App, Box, HBox, Label, ListBox, ProgressBar, TextInput, VBox,
+)
+
+tasks = ListBox(["Buy groceries", "Call the dentist", "Review PRs"])
+
+input_row = HBox(gap=1)
+input_row.add(TextInput(placeholder="New task…"))
+input_row.min_height = 1
+input_row.flex = 0
+
+list_box = Box(title=" Tasks ", border="rounded", border_style="cyan", padding=1)
+list_box.add(tasks)
+
+body = VBox(gap=1, pad=1)
+body.add(Label("[bold cyan]📋 Task Manager[/bold cyan]", align="center"))
+body.add(list_box)
+body.add(input_row)
+body.add(ProgressBar(value=33))
+
+app = App(fps=20.0)
+app.set_root(body)
+app.run()      # Tab to focus · ↑/↓ navigate · Enter activate · Esc quit
+```
+
+#### The Widget Menu
+
+| Category | Widgets |
+|:---|:---|
+| **Layout** | `VBox`, `HBox`, `Box` (bordered + padded + titled), `Container`, `ScrollView`, `Tabs` |
+| **Text & Status** | `Label` (single-line, wrapped, aligned), `Divider` (with centered title), `StatusBar`, `Spinner` |
+| **Input** | `TextInput` (cursor, scrolling, submit callback), `Button`, `Checkbox`, `ListBox` (keyboard navigation, `on_select`) |
+| **Data** | `Table` (headers, per-column alignment, scrollbar, `on_select`), `ListBox` |
+| **Charts & KPIs** | `Sparkline` (single-row mini-chart), `BarChart` (labeled vertical bars), `BigValue` (block-digit KPI tile) |
+| **Feedback** | `ProgressBar` (0..100 with `█`/`░`), `Spinner` (Dots / Line / Arrow / Block frames) |
+| **Borders** | `simple`, `rounded`, `heavy`, `double`, `ascii`, `dots`, `block` — or pass a custom `{"tl","tr","bl","br","h","v"}` dict |
+
+Every widget accepts **ANSI escapes**, **rich markup** (`[bold cyan]…[/bold cyan]`), or a plain **color name** (`"cyan"`) for its `style=` argument.
+
+#### Keyboard & Focus
+
+`App` collects every widget with `focusable = True` and cycles through them on `Tab` / `Shift+Tab`. Each widget implements `handle_key(key)` and receives raw key names — no escape-sequence parsing needed:
+
+```python
+"UP", "DOWN", "LEFT", "RIGHT", "HOME", "END", "PAGE_UP", "PAGE_DOWN",
+"ENTER", "BACKSPACE", "DELETE", "TAB", "BACKTAB", "ESCAPE",
+" ", "a", "b", "1", "\x13"   # Ctrl+S
+```
+
+Custom widgets just subclass `Widget` and implement `layout()`, `draw(buffer)`, and optionally `handle_key()`:
+
+```python
+from ascii_colors.tui import Widget
+from ascii_colors.tui.screen import ScreenBuffer
+
+class Hello(Widget):
+    def draw(self, buffer: ScreenBuffer) -> None:
+        buffer.draw_text(
+            self.x, self.y,
+            "[bold green]Hello![/bold green]",
+            max_width=self.w,
+        )
+```
+
+#### Modals
+
+`App.push_modal(widget)` renders a centered overlay on top of every other widget and captures focus until you `pop_modal()`. Perfect for file dialogs, confirmations, and error popups:
+
+```python
+from ascii_colors.tui import Box, Label, TextInput
+
+dialog = Box(title=" Save As ", border="rounded", padding=1)
+dialog.add(Label("[bold]Filename:[/bold]"))
+dialog.add(TextInput(value="untitled.py"))
+dialog.w = 60
+dialog.h = 6
+
+app.push_modal(dialog)
+# … user presses Enter → app.pop_modal()
+```
+
+#### Border Presets
+
+```python
+from ascii_colors.tui import Box, BORDERS, get_border
+
+Box(title="Simple",  border="simple")   # ┌ ┐ └ ┘
+Box(title="Rounded", border="rounded")  # ╭ ╮ ╰ ╯
+Box(title="Heavy",   border="heavy")    # ┏ ┓ ┗ ┛
+Box(title="Double",  border="double")   # ╔ ╗ ╚ ╝
+Box(title="ASCII",   border="ascii")    # + + + +
+
+# Or pass a custom charset
+Box(chars={"tl": "*", "tr": "*", "bl": "*", "br": "*", "h": "-", "v": "|"})
+```
+
+#### Live Charts
+
+```python
+from ascii_colors.tui import BarChart, BigValue, Sparkline, VBox
+
+body = VBox(gap=1, pad=1)
+body.add(BigValue(1240, label="[dim]Requests / sec[/dim]"))
+body.add(Sparkline([12, 18, 9, 22, 31, 27, 15, 42], style="green"))
+body.add(BarChart(
+    [124, 89, 176, 143, 210],
+    labels=["Mon", "Tue", "Wed", "Thu", "Fri"],
+    bar_char="█",
+    fill_style="cyan",
+))
+```
+
+#### Running the Demos
+
+Three self-contained demos live in `examples/tui/`:
+
+```bash
+python examples/tui/tui_demo.py            # Task Manager (ListBox, TextInput, Button, ProgressBar)
+python examples/tui/tui_dashboard_demo.py  # System Monitor (Table, Tabs, Spinner, StatusBar)
+python examples/tui/tui_charts_demo.py     # Charts (Sparkline, BarChart, BigValue, Divider)
+```
+
+Controls across all demos: `Tab` cycles focus, `↑`/`↓` navigates lists, `Enter`/`Space` activates, `Esc` quits.
+
+#### When *not* to use the TUI
+
+For simple progress bars, spinners, and one-off prompts, the existing `ProgressBar`, `questionary`, and `ASCIIColors.status()` APIs are lighter and more idiomatic. Reach for the TUI when you need:
+
+- A persistent full-screen interface
+- Multiple focusable widgets coordinated by keyboard
+- Real-time charts or dashboards
+- Modal workflows (file open/save, confirmation dialogs)
+- A tiny terminal text editor (see `examples/pen.py`)
 
 ---
 
