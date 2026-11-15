@@ -33,14 +33,13 @@ pip install ascii_colors
 **Optional dependencies:**
 
 ```bash
-# For accurate emoji/wide-character support in progress bars
-pip install ascii_colors[wcwidth]  # or: pip install wcwidth
-
 # For development
 pip install ascii_colors[dev]
 ```
 
 **Requirements:** Python 3.8+
+
+> **Note:** `wcwidth` is installed automatically as a required dependency — no extra step is needed for accurate emoji/wide-character support in progress bars.
 
 ---
 
@@ -175,11 +174,12 @@ ASCIIColors.orange("Orange text (256-color)")
 ASCIIColors.bold("Bold text")
 ASCIIColors.dim("Dim text")
 ASCIIColors.italic("Italic text")
-ASCIIColors.underline("Underlined text")
-ASCIIColors.blink("Blinking text")
-ASCIIColors.reverse("Reversed video")
-ASCIIColors.hidden("Hidden text (password mask)")
-ASCIIColors.strikethrough("Strikethrough text")
+
+# Other styles are available as constants — combine with .print()
+ASCIIColors.print("Underlined text", style=ASCIIColors.style_underline)
+ASCIIColors.print("Blinking text", style=ASCIIColors.style_blink)
+ASCIIColors.print("Reversed video", style=ASCIIColors.style_reverse)
+ASCIIColors.print("Strikethrough text", style=ASCIIColors.style_strikethrough)
 
 # Full control with .print()
 ASCIIColors.print(
@@ -501,12 +501,17 @@ def create_dashboard(status, progress, logs):
     
     # Combine in columns
     top_row = Columns([status_panel, progress_panel], equal=True)
-    
-    return Text.assemble(
-        top_row, "\n",
-        logs_panel, "\n",
-        metrics
-    )
+
+    # ``ascii_colors.rich.Text`` intentionally exposes only ``append``/``pad``/
+    # ``render``/``truncate``/``wrap`` (no ``assemble`` classmethod), so build
+    # the composite body explicitly and stack the sections with newlines.
+    body = Text()
+    body.append(top_row)
+    body.append("\n")
+    body.append(logs_panel)
+    body.append("\n")
+    body.append(metrics)
+    return body
 
 # Simulate live dashboard
 logs = []
@@ -589,7 +594,7 @@ with ASCIIColors.live("Preparing...", refresh_per_second=2) as live:
 Create multiple consoles with different configurations:
 
 ```python
-from ascii_colors import ASCOIIColors
+from ascii_colors import ASCIIColors
 from ascii_colors import Console, Panel, Table
 
 # Main console with full features
@@ -785,7 +790,7 @@ logger.info("Cleanup")  # Without request context
 
 #### 📜 File Rotation with `basicConfig`
 
-For long-running services that need size-based log rotation, `basicConfig` now exposes `maxBytes` and `backupCount` directly — no need to wire up a `RotatingFileHandler` manually:
+For long-running services that need size-based log rotation, `basicConfig` now exposes `file_maxBytes` and `file_backupCount` directly — no need to wire up a `RotatingFileHandler` manually:
 
 ```python
 import ascii_colors as logging
@@ -1171,7 +1176,7 @@ except Exception as e:
     print(formatted)
     
     # Or log it
-    ASCIIColors.trace_exception(e, enhanced=True)
+    trace_exception(e, enhanced=True)
 
 # Multicolor text
 ASCIIColors.multicolor(
@@ -1340,7 +1345,7 @@ For simple progress bars, spinners, and one-off prompts, the existing `ProgressB
 - Multiple focusable widgets coordinated by keyboard
 - Real-time charts or dashboards
 - Modal workflows (file open/save, confirmation dialogs)
-- A tiny terminal text editor (see `examples/pen.py`)
+- A tiny terminal text editor (see `examples/pen/`)
 
 ---
 
@@ -1516,6 +1521,7 @@ pytest tests/  # Run the test suite
 - Legacy CMD may need `colorama`: `pip install colorama`
 
 ### Progress bar width issues with wide characters
+`wcwidth` is already installed automatically as a required dependency, but you can reinstall it if it's missing:
 ```bash
 pip install wcwidth
 ```

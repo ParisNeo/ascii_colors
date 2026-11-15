@@ -74,8 +74,8 @@ Custom widgets
 Subclass :class:`ascii_colors.tui.widgets.Widget` and implement ``layout()``
 (optional), ``draw(buffer)``, and — if interactive — ``handle_key(key)``. The
 :class:`ascii_colors.tui.screen.ScreenBuffer` passed to ``draw`` exposes
-``draw_text``, ``put_char``, and related helpers that respect wide characters
-and ANSI styling.
+``set_cell``, ``put``, ``draw_text``, ``draw_wrapped``, and related helpers that
+respect wide characters and ANSI styling.
 
 .. code-block:: python
 

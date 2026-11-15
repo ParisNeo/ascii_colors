@@ -5,12 +5,57 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-# 2026-01-14
-- feat(logging): change default global level to INFO# [Unreleased]
+# 0.13.7 - Unreleased
 
-- chore(release): bump version to 0.11.6 and update .gitignore
+- feat(logging): change default global level to INFO (was WARNING since 0.8.0)
+- docs: overhaul documentation suite (index, api, tui, guides) and add TUI + TUI charts + Pen editor documentation
+- docs: publish Sphinx site to https://parisneo.github.io/ascii_colors/ via GitHub Pages workflow
 
-## [2026-08-24 23:48]
+## 0.13.6
+
+- feat(tui): add Tabs, ScrollView, Divider widgets and modal overlay support (App.push_modal/pop_modal)
+- feat(tui): add Sparkline, BarChart and BigValue chart widgets
+- feat(tui): add Spinner frame presets (DOTS, LINE, ARROW, BLOCK)
+
+## 0.13.5
+
+- feat(rich): expose Text, Columns, Rule, Status, Markdown, Syntax and Live at the top level for rich-style imports
+- feat(rich): add Text.plain / Text.assemble compatibility helpers
+
+## 0.13.4
+
+- feat(tui): introduce Table widget with header row, per-column alignment, scrollbar and on_select callback
+- feat(tui): add StatusBar and Checkbox widgets
+
+## 0.13.3
+
+- feat(tui): introduce TextInput widget with cursor, horizontal scrolling and on_submit callback
+- feat(tui): add Button widget with focus styling and ENTER/SPACE activation
+
+## 0.13.2
+
+- feat(tui): introduce App event loop with alternate screen, background render thread, focus cycling and Ctrl+C/Ctrl+Q interception on Windows
+- feat(tui): add ScreenBuffer/ScreenRenderer with diff-based row repainting and wide-character aware cell placement
+- feat(tui): add BORDERS registry (simple, rounded, heavy, double, ascii, dots, block) and border-preset helpers
+
+## 0.13.1
+
+- feat(tui): add VBox, HBox, Box and Label widgets as the first members of the new TUI framework
+- feat(examples): add TUI task manager, dashboard and charts demos under examples/tui/
+
+## 0.13.0
+
+- feat: introduce the ascii_colors.tui subpackage (curses-style, dependency-free TUI framework)
+- feat: rename compat modules to drop the _compat suffix; questionary/rich become top-level submodules
+
+## 0.12.4
+
+- feat(logging): add FolderRouterHandler for per-logger file routing
+- feat(logging): extend basicConfig with log_folder_mode, log_folder_maxBytes and log_folder_backupCount
+- feat(logging): add file_maxBytes and file_backupCount kwargs to basicConfig
+- feat(examples): add examples/pen/ — a full terminal text editor built on ascii_colors.tui
+
+## 0.12.3 - 2026-08-24 23:48
 
 - chore: bump version to 0.12.3
 
