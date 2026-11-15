@@ -29,25 +29,27 @@ The convenience methods on :class:`ascii_colors.ASCIIColors` (``panel``,
 """
 
 from ascii_colors.rich.text import Text, wcswidth
-from ascii_colors.rich.content import (
-    Panel,
-    Padding,
-    Columns,
-    Rule,
-    Markdown,
-    Syntax,
-)
+from ascii_colors.rich.content import Markdown, Syntax
+from ascii_colors.rich.layout import Panel, Padding, Columns
+
+from ascii_colors.rich.layout import Rule
 from ascii_colors.rich.style import Style, BoxStyle
 from ascii_colors.rich.table import Table
 from ascii_colors.rich.tree import Tree
-from ascii_colors.rich.console import Console
+from ascii_colors.rich.console import Console, ConsoleOptions, Measurement
 from ascii_colors.rich.live import Live, Status
-from ascii_colors.rich.layout import (
-    Measurement,
-    ConsoleOptions,
-    Renderable,
-    ConsoleRenderable,
-)
+from ascii_colors.rich.text import Renderable
+
+try:
+    from ascii_colors.rich.console import ConsoleRenderable
+except ImportError:  # pragma: no cover - typing-only symbol
+    ConsoleRenderable = None  # type: ignore[assignment]
+
+try:
+    from ascii_colors.rich.layout import RichError
+except ImportError:  # pragma: no cover - defensive fallback
+    class RichError(Exception):
+        """Base exception for the ``ascii_colors.rich`` rendering layer."""
 
 __all__ = [
     "Text",
@@ -67,5 +69,3 @@ __all__ = [
     "Status",
     "RichError",
 ]
-</file>
-<!-- END FILE: ascii_colors/ascii_colors/rich/__init__.py -->

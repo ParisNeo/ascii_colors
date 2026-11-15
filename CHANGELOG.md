@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - docs: overhaul documentation suite (index, api, tui, guides) and add TUI + TUI charts + Pen editor documentation
 - docs: publish Sphinx site to https://parisneo.github.io/ascii_colors/ via GitHub Pages workflow
 
+## [2026-11-15 21:09]
+
+- Fixing content import and consolidating imports for `ascii_colors.rich`
+
 ## 0.13.6
 
 - feat(tui): add Tabs, ScrollView, Divider widgets and modal overlay support (App.push_modal/pop_modal)
