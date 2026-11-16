@@ -14,6 +14,7 @@ from typing import Any, Callable, Iterable, Iterator, List, Optional
 from ascii_colors.constants import ANSI
 from ascii_colors.rich.style import RICH_COLOR_MAP
 from ascii_colors.rich.text import wcswidth
+from ascii_colors.rich.layout import wrap_line_preserving_ansi
 from ascii_colors.tui.borders import BORDERS, get_border
 from ascii_colors.tui.screen import ScreenBuffer, _ANSI_TERM
 
@@ -587,6 +588,453 @@ class TextInput(Widget):
             self.cursor += 1
             return True
         return False
+
+
+class MultiLineInput(Widget):
+    """A multi-line text editor designed for chat prompts.
+
+    The value may contain newlines. Display wraps to the widget width; the
+    cursor is rendered as a reversed cell at its visual position. ``ENTER``
+    submits the current value (like a chat prompt), while ``CTRL_J`` (and
+    ``ALT_ENTER``) inserts a newline. Submitted values are pushed onto a
+    navigable history (``UP``/``DOWN`` when the buffer is empty).
+    """
+
+    def __init__(
+        self,
+        value: str = "",
+        *,
+        placeholder: str = "",
+        style: str = "",
+        focus_style: str = "",
+        placeholder_style: str = "",
+        on_submit: Optional[Callable[[str], None]] = None,
+        max_height: Optional[int] = None,
+    ):
+        super().__init__(style)
+        self.value = value
+        self.cursor = len(value)
+        self.placeholder = placeholder
+        self.focus_style = focus_style or (ANSI.style_reverse + _FOCUS_FG)
+        self.placeholder_style = placeholder_style or _DIM
+        self.on_submit = on_submit
+        self.max_height = max_height
+        self.history: List[str] = []
+        self._history_idx = -1
+        self._history_stash = ""
+        self.focusable = True
+        self.min_height = 1
+        self.min_width = 10
+        self.flex = 1
+        self._scroll = 0
+
+    def _layout_lines(self) -> List[tuple]:
+        """Return ``(line, start, end)`` triples mapping visual lines to value."""
+        lines: List[tuple] = []
+        width = max(1, self.w)
+        start = 0
+        n = len(self.value)
+        while start <= n:
+            end = start
+            col = 0
+            while end < n:
+                ch = self.value[end]
+                if ch == "\n":
+                    break
+                if col >= width:
+                    break
+                col += 1
+                end += 1
+            lines.append((self.value[start:end], start, end))
+            if end >= n:
+                break
+            if self.value[end] == "\n":
+                start = end + 1
+            else:
+                start = end
+        if not lines:
+            lines.append(("", 0, 0))
+        return lines
+
+    def _cursor_row_col(self, lines: List[tuple]) -> tuple:
+        for i, (_, s, e) in enumerate(lines):
+            if s <= self.cursor <= e:
+                return i, self.cursor - s
+        return len(lines) - 1, len(lines[-1][0])
+
+    def _sync_scroll(self, lines: Optional[List[tuple]] = None) -> None:
+        if lines is None:
+            lines = self._layout_lines()
+        row, _ = self._cursor_row_col(lines)
+        view_h = self.h
+        if view_h <= 0:
+            self._scroll = 0
+            return
+        if row < self._scroll:
+            self._scroll = row
+        elif row >= self._scroll + view_h:
+            self._scroll = row - view_h + 1
+        self._scroll = max(0, min(self._scroll, max(0, len(lines) - view_h)))
+
+    def _on_submit(self) -> None:
+        text = self.value
+        if text:
+            self.history.append(text)
+        self._history_idx = -1
+        self._history_stash = ""
+        if self.on_submit:
+            self.on_submit(text)
+
+    def draw(self, buffer: ScreenBuffer) -> None:
+        if self.w <= 0 or self.h <= 0:
+            return
+        style = _resolve_style(self.style)
+        focus_style = _resolve_style(self.focus_style)
+        placeholder_style = _resolve_style(self.placeholder_style)
+        if not self.value:
+            if self._focused:
+                buffer.put(
+                    self.x, self.y,
+                    self.placeholder[: max(0, self.w - 1)],
+                    placeholder_style or self.placeholder_style,
+                )
+                buffer.set_cell(self.x, self.y, " ", focus_style or self.focus_style)
+            else:
+                buffer.put(
+                    self.x, self.y,
+                    self.placeholder[: self.w],
+                    placeholder_style or self.placeholder_style,
+                )
+            return
+        lines = self._layout_lines()
+        self._sync_scroll(lines)
+        cur_row, cur_col = self._cursor_row_col(lines)
+        view_h = self.h
+        for row_i in range(view_h):
+            line_idx = self._scroll + row_i
+            y = self.y + row_i
+            if line_idx >= len(lines):
+                buffer.put(self.x, y, " " * self.w, style)
+                continue
+            text, s, e = lines[line_idx]
+            buffer.put(self.x, y, text, style)
+            used = len(text)
+            if used < self.w:
+                buffer.put(self.x + used, y, " " * (self.w - used), style)
+        if self._focused:
+            screen_row = cur_row - self._scroll
+            if 0 <= screen_row < view_h:
+                cx = self.x + cur_col
+                if cx < self.x + self.w:
+                    line_text = lines[cur_row][0]
+                    ch = line_text[cur_col] if cur_col < len(line_text) else " "
+                    buffer.set_cell(cx, self.y + screen_row, ch, focus_style or self.focus_style)
+
+    def _line_start(self) -> int:
+        idx = self.value.rfind("\n", 0, self.cursor)
+        return idx + 1
+
+    def _line_end(self) -> int:
+        idx = self.value.find("\n", self.cursor)
+        return len(self.value) if idx == -1 else idx
+
+    def handle_key(self, key: str) -> bool:
+        if key in ("ENTER",):
+            self._on_submit()
+            return True
+        if key in ("CTRL_J", "ALT_ENTER"):
+            self.value = self.value[: self.cursor] + "\n" + self.value[self.cursor :]
+            self.cursor += 1
+            return True
+        if key == "BACKSPACE":
+            if self.cursor > 0:
+                self.value = self.value[: self.cursor - 1] + self.value[self.cursor :]
+                self.cursor -= 1
+            return True
+        if key == "DELETE":
+            if self.cursor < len(self.value):
+                self.value = self.value[: self.cursor] + self.value[self.cursor + 1 :]
+            return True
+        if key == "LEFT":
+            self.cursor = max(0, self.cursor - 1)
+            return True
+        if key == "RIGHT":
+            self.cursor = min(len(self.value), self.cursor + 1)
+            return True
+        if key == "HOME" or key == "CTRL_A":
+            self.cursor = self._line_start()
+            return True
+        if key == "END" or key == "CTRL_E":
+            self.cursor = self._line_end()
+            return True
+        if key == "CTRL_U":
+            self.value = ""
+            self.cursor = 0
+            return True
+        if key == "CTRL_W":
+            start = self.cursor
+            while start > 0 and self.value[start - 1].isspace():
+                start -= 1
+            while start > 0 and not self.value[start - 1].isspace():
+                start -= 1
+            self.value = self.value[:start] + self.value[self.cursor :]
+            self.cursor = start
+            return True
+        if key == "UP":
+            if not self.value and self.history:
+                if self._history_idx == -1:
+                    self._history_stash = self.value
+                    self._history_idx = len(self.history) - 1
+                elif self._history_idx > 0:
+                    self._history_idx -= 1
+                self.value = self.history[self._history_idx]
+                self.cursor = len(self.value)
+                return True
+            lines = self._layout_lines()
+            row, col = self._cursor_row_col(lines)
+            if row > 0:
+                prev = lines[row - 1]
+                _t, s, e = prev
+                length = e - s
+                self.cursor = s + min(col, length)
+            return True
+        if key == "DOWN":
+            if self._history_idx != -1:
+                if self._history_idx < len(self.history) - 1:
+                    self._history_idx += 1
+                    self.value = self.history[self._history_idx]
+                else:
+                    self._history_idx = -1
+                    self.value = self._history_stash
+                self.cursor = len(self.value)
+                return True
+            lines = self._layout_lines()
+            row, col = self._cursor_row_col(lines)
+            if row < len(lines) - 1:
+                nxt = lines[row + 1]
+                _t, s, e = nxt
+                length = e - s
+                self.cursor = s + min(col, length)
+            return True
+        if len(key) == 1 and key.isprintable() and key not in ("\t",):
+            self.value = self.value[: self.cursor] + key + self.value[self.cursor :]
+            self.cursor += 1
+            return True
+        return False
+
+
+class ChatView(Widget):
+    """A scrollable, streaming-friendly chat transcript.
+
+    Renders a list of ``{"role", "content"}`` messages, each prefixed by a
+    role-coloured label header and wrapped to the available width. Designed
+    for streaming: use :meth:`append_to_last` / :meth:`update_last` to feed
+    incremental model output while keeping the view pinned to the bottom
+    unless the user has scrolled up.
+    """
+
+    def __init__(
+        self,
+        messages: Optional[Iterable[dict]] = None,
+        *,
+        user_style: str = "",
+        assistant_style: str = "",
+        system_style: str = "",
+        tool_style: str = "",
+        error_style: str = "",
+        user_label: str = "You",
+        assistant_label: str = "AI",
+        system_label: str = "system",
+        tool_label: str = "tool",
+        error_label: str = "error",
+        show_labels: bool = True,
+    ):
+        super().__init__()
+        self.messages: List[dict] = []
+        if messages:
+            for message in messages:
+                self.messages.append(
+                    {
+                        "role": message.get("role", "user"),
+                        "content": message.get("content", ""),
+                    }
+                )
+        self.user_style = user_style
+        self.assistant_style = assistant_style
+        self.system_style = system_style
+        self.tool_style = tool_style
+        self.error_style = error_style
+        if not self.user_style:
+            self.user_style = ANSI.style_bold + _CYAN
+        if not self.assistant_style:
+            self.assistant_style = _GREEN
+        if not self.system_style:
+            self.system_style = _DIM
+        if not self.tool_style:
+            self.tool_style = RICH_COLOR_MAP.get("bright_yellow", "\033[93m")
+        if not self.error_style:
+            self.error_style = RICH_COLOR_MAP.get("bright_red", "\033[91m")
+        self.user_label = user_label
+        self.assistant_label = assistant_label
+        self.system_label = system_label
+        self.tool_label = tool_label
+        self.error_label = error_label
+        self.show_labels = show_labels
+        self.focusable = True
+        self.min_height = 5
+        self.min_width = 20
+        self.flex = 1
+        self.scroll = 0
+        self._dirty = True
+        self._lines: List[tuple] = []
+        self._last_width = -1
+        self._auto_scroll = True
+
+    def add_message(self, role: str, content: str) -> int:
+        self.messages.append({"role": role, "content": content or ""})
+        self._dirty = True
+        self._auto_scroll = True
+        return len(self.messages) - 1
+
+    def update_last(self, content: str) -> None:
+        if not self.messages:
+            self.add_message("assistant", content or "")
+            return
+        self.messages[-1]["content"] = content or ""
+        self._dirty = True
+        self._auto_scroll = True
+
+    def append_to_last(self, chunk: str) -> None:
+        if not self.messages:
+            self.add_message("assistant", "")
+        self.messages[-1]["content"] = (
+            self.messages[-1].get("content") or ""
+        ) + (chunk or "")
+        self._dirty = True
+        self._auto_scroll = True
+
+    def clear(self) -> None:
+        self.messages = []
+        self._dirty = True
+        self._auto_scroll = True
+
+    def scroll_to_end(self) -> None:
+        self._rebuild_lines_if_needed()
+        self.scroll = max(0, len(self._lines) - self.h)
+        self._auto_scroll = True
+
+    def scroll_up(self, n: int = 1) -> None:
+        self.scroll = max(0, self.scroll - n)
+        self._auto_scroll = False
+
+    def scroll_down(self, n: int = 1) -> None:
+        max_scroll = max(0, len(self._lines) - self.h)
+        self.scroll = min(max_scroll, self.scroll + n)
+        if self.scroll >= max_scroll:
+            self._auto_scroll = True
+
+    def handle_key(self, key: str) -> bool:
+        self._rebuild_lines_if_needed()
+        if key in ("UP", "k"):
+            self.scroll_up(1)
+            return True
+        if key in ("DOWN", "j"):
+            self.scroll_down(1)
+            return True
+        if key == "PAGE_UP":
+            self.scroll_up(max(1, self.h - 1))
+            return True
+        if key == "PAGE_DOWN":
+            self.scroll_down(max(1, self.h - 1))
+            return True
+        if key == "HOME":
+            self.scroll = 0
+            self._auto_scroll = False
+            return True
+        if key == "END":
+            self.scroll_to_end()
+            return True
+        if key == "CTRL_L":
+            self.clear()
+            return True
+        return False
+
+    def _rebuild_lines_if_needed(self) -> None:
+        available_width = max(1, self.w - 3)
+        if not self._dirty and self._last_width == available_width:
+            return
+        self._last_width = available_width
+        self._dirty = False
+        self._lines = []
+        label_of = {
+            "user": self.user_label,
+            "assistant": self.assistant_label,
+            "system": self.system_label,
+            "tool": self.tool_label,
+            "error": self.error_label,
+        }
+        style_of = {
+            "user": self.user_style,
+            "assistant": self.assistant_style,
+            "system": self.system_style,
+            "tool": self.tool_style,
+            "error": self.error_style,
+        }
+        for i, message in enumerate(self.messages):
+            role = message.get("role", "user")
+            role = role if role in style_of else "assistant"
+            line_style = style_of[role] or _DIM
+            if i > 0:
+                self._lines.append((role, "", ""))
+            if self.show_labels:
+                label = label_of.get(role, role)
+                self._lines.append((role, f"┤ {label} ├", line_style))
+            content = _markup(message.get("content", "") or "")
+            for raw_line in content.split("\n"):
+                for wrapped in wrap_line_preserving_ansi(raw_line, available_width):
+                    self._lines.append((role, wrapped, line_style))
+
+    def draw(self, buffer: ScreenBuffer) -> None:
+        if self.w <= 0 or self.h <= 0:
+            return
+        self._rebuild_lines_if_needed()
+        total = len(self._lines)
+        view_h = self.h
+        max_scroll = max(0, total - view_h)
+        if self._auto_scroll:
+            self.scroll = max_scroll
+        else:
+            self.scroll = max(0, min(self.scroll, max_scroll))
+        has_sb = total > view_h
+        content_w = max(1, self.w - (1 if has_sb else 0))
+        for row in range(view_h):
+            y = self.y + row
+            buffer.put(self.x, y, " " * self.w, self.style)
+            idx = self.scroll + row
+            if idx >= total:
+                continue
+            _role, text, line_style = self._lines[idx]
+            if not text:
+                continue
+            if self.w > 2:
+                buffer.draw_text(
+                    self.x + 2,
+                    y,
+                    text,
+                    line_style or self.style,
+                    max_width=max(0, content_w - 2),
+                )
+        if has_sb:
+            _draw_scrollbar(
+                buffer,
+                self.x + self.w - 1,
+                self.y,
+                view_h,
+                total,
+                view_h,
+                self.scroll,
+                _CYAN,
+            )
 
 
 # ---------------------------------------------------------------- data widgets
