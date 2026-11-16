@@ -30,13 +30,18 @@ _builtin_print = builtins.print
 _ANSI_STRIP_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
 _ANSI_TERM_CHARS = 'ABCDEFGHJKSTfmnsulh'
 
-# Box-drawing characters that indicate the start of a bordered renderable.
-# When such a line is emitted while the cursor is mid-line, a newline must be
-# prepended so the border aligns at column 0.
+# Box-drawing characters that indicate the start of a bordered renderable
+# (Panels, Tables, Trees, …) or a horizontal rule/divider. When such a line
+# is emitted while the cursor is mid-line, a newline must be prepended so the
+# block aligns at column 0. The name is retained for historical continuity.
 _BOX_LEFT_CHARS = (
     "┌", "╭", "╔", "┏", "╓", "╒", "┍", "┎",   # top-left corners
     "├", "╠", "┣", "╟", "┝",                    # left T-junctions
     "└", "╰", "╚", "┗", "╙", "╘", "┕", "┖",   # bottom-left corners
+    # Horizontal rule characters: a line starting with one of these is
+    # almost certainly a Rule/Divider block and must never be glued onto
+    # preceding mid-line output.
+    "─", "═", "━",
 )
 
 
@@ -327,7 +332,17 @@ class Console:
     def _ensure_line_start_for(self, first_line: str) -> None:
         """Prepend a newline before a bordered renderable if the cursor is
         currently mid-line. This prevents box-drawing output from being glued
-        onto the tail of a previous ``end=''`` write."""
+        onto the tail of a previous ``end=''`` write.
+
+        The line break is emitted as an explicit ``\\r\\n`` rather than a bare
+        ``\\n`` so that the cursor always returns to column 0 even when the
+        terminal's output-processing flags (OPOST / ONLCR) are disabled — for
+        instance while another thread is temporarily inside ``_get_key()``'s
+        raw-mode window. A bare ``\\n`` in that state produces only a
+        linefeed: the cursor moves down one row but stays at the original
+        column, and the bordered renderable is glued a few columns to the
+        right of where it should be.
+        """
         if not first_line:
             return
         from ascii_colors.core import ASCIIColors
@@ -335,7 +350,7 @@ class Console:
             return
         first_plain = _ANSI_STRIP_RE.sub("", first_line).lstrip()
         if first_plain.startswith(_BOX_LEFT_CHARS):
-            _builtin_print("", file=self.file)
+            _builtin_print("", end="\r\n", file=self.file)
             ASCIIColors._set_at_line_start(True)
             if self.record:
                 self._record_buffer.append("\n")
@@ -934,7 +949,12 @@ class Console:
         
         with self._output_lock:
             self._ensure_line_start_for(line)
-            self._write(line)
+            # Terminate the rule with an explicit CR+LF so that the cursor
+            # really returns to column 0 on every terminal, regardless of the
+            # state of the tty's output-processing flags. Otherwise a bare
+            # LF would leave the cursor mid-line and glue the *next* write
+            # onto the tail of the rule.
+            self._write(line, end="\r\n")
     
     def input(
         self,
