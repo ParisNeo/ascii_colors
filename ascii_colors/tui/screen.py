@@ -389,31 +389,114 @@ class ScreenBuffer:
 
 
 class ScreenRenderer:
-    """Writes screen diffs to a text stream."""
+    """Write terminal-friendly, synchronized screen updates.
 
-    def __init__(self, stream=None):
+    Rendering happens at span granularity instead of repainting every changed
+    row in full. DEC mode 2026 brackets each frame on supporting terminals, so
+    a frame is presented atomically and does not visibly tear while several
+    spans are being updated.
+    """
+
+    def __init__(self, stream=None, *, synchronized_output: bool = True):
         self.stream = stream or sys.stdout
-        self._prev_rows: List[str] = []
+        self.synchronized_output = synchronized_output
+        self._prev_cells: List[List[Cell]] = []
 
     def set_stream(self, stream) -> None:
         self.stream = stream
+        self._prev_cells = []
+
+    @staticmethod
+    def _snapshot(buffer: ScreenBuffer) -> List[List[Cell]]:
+        return [
+            [Cell(cell.char, cell.style) for cell in row]
+            for row in buffer.cells
+        ]
+
+    @staticmethod
+    def _valid_style(style: str) -> str:
+        return style if style.startswith("\x1b") else ""
+
+    def _encode_span(
+        self,
+        row: List[Cell],
+        start: int,
+        end: int,
+    ) -> str:
+        """Encode ``row[start:end]`` without leaking non-ANSI style names."""
+        parts: List[str] = []
+        current_style = ""
+        for cell in row[start:end]:
+            if cell.char == "":
+                continue
+            style = self._valid_style(cell.style)
+            if style != current_style:
+                if current_style:
+                    parts.append(ANSI.color_reset)
+                if style:
+                    parts.append(style)
+                current_style = style
+            parts.append(cell.char)
+        if current_style:
+            parts.append(ANSI.color_reset)
+        return "".join(parts)
 
     def draw(self, buffer: ScreenBuffer, force: bool = False) -> None:
-        rows = buffer.render_rows()
+        shape_changed = (
+            len(self._prev_cells) != buffer.height
+            or any(
+                len(previous) != len(current)
+                for previous, current in zip(self._prev_cells, buffer.cells)
+            )
+        )
+        repaint_all = force or shape_changed
         out: List[str] = []
-        for y, row in enumerate(rows):
-            if not force and y < len(self._prev_rows) and self._prev_rows[y] == row:
+
+        for y, row in enumerate(buffer.cells):
+            previous = (
+                self._prev_cells[y]
+                if not repaint_all and y < len(self._prev_cells)
+                else []
+            )
+            changed = [
+                x
+                for x, cell in enumerate(row)
+                if repaint_all
+                or x >= len(previous)
+                or cell != previous[x]
+            ]
+            if not changed:
                 continue
-            out.append(f"\033[{y + 1};1H{row}\033[K")
-        self._prev_rows = rows
+
+            # Merge nearby changes into one cursor movement/write. A small
+            # unchanged gap is cheaper to repaint than another escape pair.
+            spans: List[Tuple[int, int]] = []
+            start = end = changed[0]
+            for x in changed[1:]:
+                if x - end <= 4:
+                    end = x
+                else:
+                    spans.append((start, end))
+                    start = end = x
+            spans.append((start, end))
+
+            for start, end in spans:
+                encoded = self._encode_span(row, start, end + 1)
+                out.append(f"\033[{y + 1};{start + 1}H{encoded}")
+
+        self._prev_cells = self._snapshot(buffer)
         if out:
+            if self.synchronized_output:
+                self.stream.write("\033[?2026h")
             self.stream.write("".join(out))
+            if self.synchronized_output:
+                self.stream.write("\033[?2026l")
             self.stream.flush()
 
     def clear_screen(self) -> None:
         self.stream.write("\033[2J\033[H")
         self.stream.flush()
-        self._prev_rows = []
+        self._prev_cells = []
 
     def move_to(self, x: int, y: int) -> None:
         self.stream.write(f"\033[{y + 1};{x + 1}H")

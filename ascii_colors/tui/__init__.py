@@ -15,6 +15,8 @@ Public surface:
   :class:`Spinner`, :class:`StatusBar`.
 * Charts: :class:`Sparkline`, :class:`BarChart`, :class:`BigValue`.
 * Borders: :data:`BORDERS`, :func:`get_border`.
+* Chatbot: :class:`ChatbotApp`, :class:`GeneratorProtocol`,
+  :class:`CallableGenerator`, :class:`LollmsAdapter`.
 
 Example::
 
@@ -33,15 +35,19 @@ from ascii_colors.tui.app import App
 from ascii_colors.tui.borders import BORDERS, get_border
 from ascii_colors.tui.screen import Cell, ScreenBuffer, ScreenRenderer
 from ascii_colors.tui.widgets import (
+    AsciiArt,
     BarChart,
+    BigText,
     BigValue,
     Box,
     Button,
+    ChatView,
     Checkbox,
     Container,
     Divider,
     HBox,
     Label,
+    MultiLineInput,
     ListBox,
     ProgressBar,
     ScrollView,
@@ -53,6 +59,23 @@ from ascii_colors.tui.widgets import (
     TextInput,
     VBox,
     Widget,
+)
+from ascii_colors.utils import MouseEvent
+from ascii_colors.tui.chat_widgets import RichChatView
+from ascii_colors.tui.log_capture import (
+    CapturedLog,
+    MemoryLogHandler,
+    TerminalLogBuffer,
+    attach_log_capture,
+)
+from ascii_colors.tui.chatbot import (
+    ChatSession,
+    CallableGenerator,
+    ChatbotApp,
+    GeneratorProtocol,
+    LollmsAdapter,
+    LollmsDiscussionAdapter,
+    try_build_lollms_generator,
 )
 
 __all__ = [
@@ -70,6 +93,7 @@ __all__ = [
     "ScrollView",
     "Tabs",
     "Label",
+    "AsciiArt",
     "Divider",
     "Button",
     "Checkbox",
@@ -82,4 +106,20 @@ __all__ = [
     "Sparkline",
     "BarChart",
     "BigValue",
+    "BigText",
+    "MouseEvent",
+    "ChatView",
+    "RichChatView",
+    "CapturedLog",
+    "TerminalLogBuffer",
+    "MemoryLogHandler",
+    "attach_log_capture",
+    "MultiLineInput",
+    "ChatSession",
+    "ChatbotApp",
+    "GeneratorProtocol",
+    "CallableGenerator",
+    "LollmsAdapter",
+    "LollmsDiscussionAdapter",
+    "try_build_lollms_generator",
 ]

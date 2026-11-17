@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - docs: overhaul documentation suite (index, api, tui, guides) and add TUI + TUI charts + Pen editor documentation
 - docs: publish Sphinx site to https://parisneo.github.io/ascii_colors/ via GitHub Pages workflow
 
+## [2026-11-17 02:02]
+
+- git commit -m "Add basic widget support and update imports for TUI framework"
+
 ## [2026-11-16 17:01]
 
 - `Fix terminal escape sequence handling in console.py: improve clarity for box-drawing and rule characters, add horizontal rule character guards for proper alignment`

@@ -47,7 +47,9 @@ def _make_console():
 
 
 def _visible(text: str) -> str:
-    return _ANSI_RE.sub("", text)
+    # CR is terminal cursor control, not visible rule content. Raw CRLF
+    # behavior remains pinned separately by test_ensure_line_start_uses_explicit_crlf.
+    return _ANSI_RE.sub("", text).replace("\r", "")
 
 
 def test_rule_starts_on_new_line_after_mid_line_print():

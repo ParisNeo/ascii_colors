@@ -1,23 +1,27 @@
 # -*- coding: utf-8 -*-
-"""
-Application event loop for the ascii_colors TUI framework.
+"""Application runtime for the ascii_colors TUI framework.
 
-The ``App`` class:
-  * enters the terminal's alternate screen buffer,
-  * spawns a background render thread (so animations stay smooth even while
-    the main thread blocks on keyboard input),
-  * dispatches key events to the focused widget,
-  * restores the terminal cleanly on exit (including on exceptions).
+The runtime uses three cooperating execution paths:
+
+* an input thread translates platform input into key/mouse events,
+* the main thread consumes one serialized event queue,
+* a render thread paints the latest state at the configured frame rate.
+
+Terminal callbacks therefore never race each other, and worker threads can use
+:meth:`App.post` to update widgets without mutating them during a draw.
 """
 
 import os
+import queue
 import shutil
 import sys
 import threading
-from typing import Iterator, List, Optional
+from functools import partial
+from typing import Callable, Iterator, List, Optional, Union
 
 from ascii_colors.tui.screen import ScreenBuffer, ScreenRenderer
 from ascii_colors.tui.widgets import Container, Widget
+from ascii_colors.utils import MouseEvent
 
 
 _KEY_ALIASES = {
@@ -34,7 +38,7 @@ _KEY_ALIASES = {
 }
 
 
-def _read_key() -> str:
+def _read_key() -> Union[str, MouseEvent]:
     """Read a single key using the library's cross-platform helper."""
     from ascii_colors.utils import _get_key
 
@@ -42,7 +46,7 @@ def _read_key() -> str:
 
 
 class App:
-    """A minimal curses-style application loop."""
+    """A curses-style application with queued events and mouse routing."""
 
     def __init__(
         self,
@@ -53,6 +57,8 @@ class App:
         hide_cursor: bool = True,
         quit_keys: Optional[List[str]] = None,
         force_terminal: Optional[bool] = None,
+        mouse: bool = False,
+        synchronized_output: bool = True,
     ):
         self.fps = max(1.0, fps)
         self.stream = stream or sys.stdout
@@ -60,34 +66,68 @@ class App:
         self.hide_cursor = hide_cursor
         self.quit_keys = list(quit_keys) if quit_keys is not None else ["ESCAPE"]
         self.force_terminal = force_terminal
+        self.mouse = mouse
+        self.on_mouse: Optional[Callable[[MouseEvent], None]] = None
+        self._key_bindings: dict = {}
 
         self.root: Optional[Widget] = None
         self.width = 0
         self.height = 0
         self.buffer = ScreenBuffer(1, 1)
-        self.renderer = ScreenRenderer(self.stream)
+        self.renderer = ScreenRenderer(
+            self.stream, synchronized_output=synchronized_output
+        )
 
         self._lock = threading.RLock()
         self._stop_event = threading.Event()
+        self._events: queue.Queue = queue.Queue()
         self._render_thread: Optional[threading.Thread] = None
-        self._started = False
+        self._input_thread: Optional[threading.Thread] = None
         self._focus_targets: List[Widget] = []
         self._focus_idx = 0
         self._modals: List[Widget] = []
+        self._hovered: Optional[Widget] = None
+        self._mouse_capture: Optional[Widget] = None
 
     # ------------------------------------------------------------ public API
     def set_root(self, root: Widget) -> None:
         self.root = root
-        self._attach_app(root)
+        root._attach_app(self)
 
     def exit(self) -> None:
         self._stop_event.set()
 
+    def post(self, callback: Callable, *args, **kwargs) -> None:
+        """Schedule ``callback`` on the UI thread.
+
+        This is the supported way for model/network worker threads to update
+        widget state. The callable is serialized with keyboard and mouse input.
+        """
+        if not callable(callback):
+            raise TypeError("App.post() expects a callable")
+        self._events.put(partial(callback, *args, **kwargs))
+
+    call_soon = post
+
+    def bind(self, key: str, callback: Callable[[], None]) -> None:
+        """Bind a named key to an application-level callback.
+
+        Bindings are intended for commands such as ``CTRL_N`` and ``F1``.
+        They run before focused-widget dispatch; unbound printable keys keep
+        flowing to text editors normally.
+        """
+        if not callable(callback):
+            raise TypeError("App.bind() expects a callable")
+        self._key_bindings[key] = callback
+
+    def unbind(self, key: str) -> None:
+        self._key_bindings.pop(key, None)
+
     def push_modal(self, widget: Widget) -> None:
-        """Push a centered modal overlay; keyboard focus is restricted to it."""
+        """Push a centered modal overlay; input focus is restricted to it."""
         with self._lock:
             widget.parent = None
-            self._attach_app(widget)
+            widget._attach_app(self)
             self._modals.append(widget)
             self._refresh_focus()
 
@@ -97,18 +137,33 @@ class App:
             if not self._modals:
                 return None
             popped = self._modals.pop()
+            self._mouse_capture = None
+            self._set_hovered(None)
             self._refresh_focus()
             return popped
 
     def refresh_focus(self) -> None:
-        """Recompute the focusable widgets after structural changes."""
+        """Recompute focusable widgets while preserving the current focus."""
         with self._lock:
             self._refresh_focus()
 
-    def _attach_app(self, widget: Widget) -> None:
-        widget._attach_app(self)
+    def focus(self, widget: Widget) -> bool:
+        """Focus ``widget`` and return whether it is currently focusable.
+
+        Applications use this to choose an intentional initial focus target,
+        such as a chat composer, instead of accepting the first widget found
+        during tree traversal.
+        """
+        with self._lock:
+            if widget not in self._focus_targets:
+                self._refresh_focus()
+            if widget not in self._focus_targets:
+                return False
+            self._focus_on(widget)
+            return True
 
     def _refresh_focus(self) -> None:
+        previous = self._focused_widget()
         for target in self._focus_targets:
             target._focused = False
         self._focus_targets = []
@@ -116,9 +171,14 @@ class App:
             self._focus_targets = list(self._collect_focusables(self._modals[-1]))
         if not self._focus_targets and self.root is not None:
             self._focus_targets = list(self._collect_focusables(self.root))
-        if self._focus_targets:
+        if not self._focus_targets:
             self._focus_idx = 0
-            self._focus_targets[0]._focused = True
+            return
+        if previous in self._focus_targets:
+            self._focus_idx = self._focus_targets.index(previous)
+        else:
+            self._focus_idx = min(self._focus_idx, len(self._focus_targets) - 1)
+        self._focus_targets[self._focus_idx]._focused = True
 
     def run(self) -> None:
         if self.root is None:
@@ -132,30 +192,48 @@ class App:
         self._enable_tui()
         try:
             self._initial_layout()
+            self._stop_event.clear()
             self._render_thread = threading.Thread(
                 target=self._render_loop, name="ascii-tui-render", daemon=True
             )
-            self._stop_event.clear()
+            self._input_thread = threading.Thread(
+                target=self._input_loop, name="ascii-tui-input", daemon=True
+            )
             self._render_thread.start()
-
-            while not self._stop_event.is_set():
-                if not self._started:
-                    continue
-                try:
-                    key = _read_key()
-                except (KeyboardInterrupt, EOFError, OSError):
-                    break
-
-                if not key:
-                    continue
-                key = _KEY_ALIASES.get(key, key)
-                with self._lock:
-                    self._dispatch_key(key)
+            self._input_thread.start()
+            self._event_loop()
         finally:
             self._stop_event.set()
             if self._render_thread and self._render_thread.is_alive():
                 self._render_thread.join(timeout=1.5)
+            # Input can remain blocked in the OS console API. It is a daemon;
+            # never hang application shutdown waiting for another keypress.
             self._disable_tui()
+
+    def _input_loop(self) -> None:
+        while not self._stop_event.is_set():
+            try:
+                key = _read_key()
+            except (KeyboardInterrupt, EOFError, OSError):
+                self._stop_event.set()
+                return
+            if key:
+                self._events.put(key)
+
+    def _event_loop(self) -> None:
+        while not self._stop_event.is_set():
+            try:
+                event = self._events.get(timeout=0.1)
+            except queue.Empty:
+                continue
+            with self._lock:
+                if callable(event) and not isinstance(event, MouseEvent):
+                    event()
+                elif isinstance(event, MouseEvent):
+                    self._dispatch_mouse(event)
+                else:
+                    key = _KEY_ALIASES.get(event, event)
+                    self._dispatch_key(key)
 
     # ------------------------------------------------------------ TUI plumbing
     def _is_tty(self) -> bool:
@@ -165,23 +243,35 @@ class App:
             return False
 
     def _enable_tui(self) -> None:
-        from ascii_colors.utils import set_windows_ctrl_c_ignored
+        from ascii_colors.utils import (
+            enable_windows_vt_input,
+            set_windows_ctrl_c_ignored,
+        )
 
         set_windows_ctrl_c_ignored(True)
+        enable_windows_vt_input(self.mouse)
         sequence = []
         if self.alt_screen:
             sequence.append("\033[?1049h")
         if self.hide_cursor:
             sequence.append("\033[?25l")
+        if self.mouse:
+            sequence.append("\033[?1000h\033[?1002h\033[?1006h")
         sequence.append("\033[2J\033[H")
         self.stream.write("".join(sequence))
         self.stream.flush()
 
     def _disable_tui(self) -> None:
-        from ascii_colors.utils import set_windows_ctrl_c_ignored
+        from ascii_colors.utils import (
+            enable_windows_vt_input,
+            set_windows_ctrl_c_ignored,
+        )
 
         set_windows_ctrl_c_ignored(False)
+        enable_windows_vt_input(False)
         sequence = []
+        if self.mouse:
+            sequence.append("\033[?1006l\033[?1002l\033[?1000l")
         if self.hide_cursor:
             sequence.append("\033[?25h")
         if self.alt_screen:
@@ -198,7 +288,6 @@ class App:
         self.buffer = ScreenBuffer(width, height)
         self.root.layout(0, 0, width, height)
         self._refresh_focus()
-        self._started = True
 
     def _get_terminal_size(self):
         try:
@@ -226,19 +315,39 @@ class App:
         if widget.focusable:
             yield widget
 
+    def refresh(self, *, clear: bool = False) -> None:
+        """Relayout and repaint the application immediately.
+
+        Use this after changing several pieces of application state at once,
+        such as applying settings or replacing a generator. Rendering remains
+        synchronized with the background renderer through the app lock.
+
+        ``clear=True`` also clears the physical terminal before repainting;
+        this is useful after overlays close or stale cells are visible.
+        """
+        with self._lock:
+            if self.root is None or self.width <= 0 or self.height <= 0:
+                return
+            if clear:
+                self.renderer.clear_screen()
+            self._draw_frame(force=True)
+
+    def _draw_frame(self, *, force: bool = False) -> None:
+        self._resize_if_needed()
+        self.root.layout(0, 0, self.width, self.height)
+        self.buffer.clear()
+        self.root.draw(self.buffer)
+        for modal in self._modals:
+            self._layout_modal(modal)
+            modal.draw(self.buffer)
+        self.renderer.draw(self.buffer, force=force)
+
     def _render_loop(self) -> None:
         interval = 1.0 / self.fps
         while not self._stop_event.is_set():
             with self._lock:
                 try:
-                    self._resize_if_needed()
-                    self.root.layout(0, 0, self.width, self.height)
-                    self.buffer.clear()
-                    self.root.draw(self.buffer)
-                    for modal in self._modals:
-                        self._layout_modal(modal)
-                        modal.draw(self.buffer)
-                    self.renderer.draw(self.buffer)
+                    self._draw_frame()
                 except Exception as exc:
                     try:
                         message = (
@@ -259,6 +368,82 @@ class App:
         self.buffer.resize(width, height)
         self.renderer.clear_screen()
 
+    # ------------------------------------------------------------ mouse dispatch
+    @staticmethod
+    def _point_in_widget(widget: Widget, x: int, y: int) -> bool:
+        return widget.visible and widget.contains(x, y)
+
+    def _deepest_at(self, widget: Widget, x: int, y: int) -> Optional[Widget]:
+            if not widget.visible:
+                return None
+            if getattr(widget, "completion_active", False):
+                count = min(6, len(widget.completion_items))
+                top = max(0, widget.y - count)
+                if widget.x <= x < widget.x + widget.w and top <= y < top + count:
+                    return widget
+            if not self._point_in_widget(widget, x, y):
+                return None
+            if isinstance(widget, Container):
+                for child in reversed(widget.children):
+                    found = self._deepest_at(child, x, y)
+                    if found is not None:
+                        return found
+            return widget
+    def _widget_at(self, x: int, y: int) -> Optional[Widget]:
+        if self._modals:
+            for modal in reversed(self._modals):
+                found = self._deepest_at(modal, x, y)
+                if found is not None:
+                    return found
+            return None
+        return self._deepest_at(self.root, x, y) if self.root else None
+
+    def _set_hovered(self, widget: Optional[Widget]) -> None:
+        if widget is self._hovered:
+            return
+        if self._hovered is not None:
+            self._hovered.hovered = False
+            self._hovered.on_mouse_leave()
+        self._hovered = widget
+        if widget is not None:
+            widget.hovered = True
+            widget.on_mouse_enter()
+
+    def _focus_on(self, widget: Widget) -> None:
+        if widget not in self._focus_targets:
+            return
+        current = self._focused_widget()
+        if current is not None:
+            current._focused = False
+        self._focus_idx = self._focus_targets.index(widget)
+        widget._focused = True
+
+    def _dispatch_mouse(self, mouse: MouseEvent) -> None:
+        if self.on_mouse is not None:
+            self.on_mouse(mouse)
+
+        target = self._mouse_capture or self._widget_at(mouse.x, mouse.y)
+        self._set_hovered(target)
+        if target is None:
+            return
+
+        if mouse.action == "press" and mouse.button in ("left", "middle", "right"):
+            self._mouse_capture = target
+            if target.focusable:
+                self._focus_on(target)
+
+        node: Optional[Widget] = target
+        while node is not None:
+            if node.handle_mouse(mouse):
+                break
+            if mouse.action == "wheel":
+                node = node.parent
+            else:
+                break
+
+        if mouse.action == "release":
+            self._mouse_capture = None
+
     # ------------------------------------------------------------ key dispatch
     def _focused_widget(self) -> Optional[Widget]:
         if not self._focus_targets:
@@ -277,27 +462,36 @@ class App:
             focused._focused = True
 
     def _dispatch_key(self, key: str) -> None:
-        if key in self.quit_keys:
+        # A modal owns Escape while it is open. Global quit keys must not
+        # terminate the application before the dialog can cancel itself.
+        if key in self.quit_keys and not self._modals:
+            focused = self._focused_widget()
+            if focused is not None and focused.handle_key(key):
+                return
             self._stop_event.set()
             return
 
-        focused = self._focused_widget()
+        binding = self._key_bindings.get(key)
+        if binding is not None:
+            binding()
+            return
 
+        focused = self._focused_widget()
         if key in ("CTRL_C", "CTRL_Q"):
-            # Give the focused widget (and any open modal) first refusal so a
-            # text editor can use Ctrl+C for copy. Fall back to quitting when
-            # nothing consumes the key and no modal is trapping focus.
             if not self._modals and (focused is None or not focused.handle_key(key)):
                 self._stop_event.set()
             return
 
         if key in ("TAB", "BACKTAB"):
-            # Widgets that genuinely want Tab (text editors insert an indent)
-            # get it first; everything else keeps the focus-cycling behaviour.
             if focused is not None and focused.handle_key(key):
                 return
             self._cycle_focus(1 if key == "TAB" else -1)
             return
 
-        if focused is not None:
-            focused.handle_key(key)
+        if focused is not None and focused.handle_key(key):
+            return
+        if self._modals and key == "ESCAPE":
+            # Let custom modal chrome cancel first; ordinary dialogs such as
+            # Help still get conventional Escape-to-close behavior.
+            if not self._modals[-1].handle_key(key):
+                self.pop_modal()

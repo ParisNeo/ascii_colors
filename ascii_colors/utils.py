@@ -5,10 +5,41 @@ import re
 import shutil
 import sys
 import traceback
+from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from ascii_colors.constants import ANSI
+
+
+@dataclass
+class MouseEvent:
+    """A structured mouse event delivered by the terminal (SGR mouse mode).
+
+    Coordinates are already translated to the app's 0-based grid (matching
+    ``ScreenBuffer.render_rows()``), so ``(event.x, event.y)`` maps directly
+    onto ``Widget.x / Widget.y`` for hit-testing.
+    """
+
+    x: int
+    y: int
+    button: str       # "left", "middle", "right", "wheel_up", "wheel_down", "none"
+    action: str       # "press", "release", "move", "wheel"
+    shift: bool = False
+    alt: bool = False
+    ctrl: bool = False
+
+    @property
+    def is_press(self) -> bool:
+        return self.action == "press"
+
+    @property
+    def is_release(self) -> bool:
+        return self.action == "release"
+
+    @property
+    def is_wheel(self) -> bool:
+        return self.action == "wheel"
 
 if platform.system() == "Windows":
     import msvcrt
@@ -93,6 +124,50 @@ _KEY_MAP_UNIX_TILDE = {
 }
 
 
+def _parse_sgr_mouse(btn_str: str, final: str) -> Union["MouseEvent", str]:
+    """Parse a SGR mouse body ``<btn;col;row`` (without the leading ``<``).
+
+    ``final`` is the sequence terminator: ``M`` for a press / drag and ``m``
+    for a button release. Returns a :class:`MouseEvent` on success, or the
+    empty string on failure so callers can safely ignore garbage input.
+    """
+    try:
+        parts = btn_str.split(";")
+        btn = int(parts[0])
+        col = int(parts[1])
+        row = int(parts[2])
+    except (ValueError, IndexError):
+        return ""
+
+    shift = bool(btn & 4)
+    alt = bool(btn & 8)
+    ctrl = bool(btn & 16)
+    motion = bool(btn & 32)
+    wheel = bool(btn & 64)
+    base = btn & 3
+
+    if wheel:
+        if base == 0:
+            button = "wheel_up"
+        elif base == 1:
+            button = "wheel_down"
+        elif base == 2:
+            button = "wheel_left"
+        else:
+            button = "wheel_right"
+        return MouseEvent(col - 1, row - 1, button, "wheel", shift, alt, ctrl)
+
+    names = {0: "left", 1: "middle", 2: "right", 3: "none"}
+    button = names.get(base, "none")
+    if motion:
+        action = "move"
+    elif final == "m":
+        action = "release"
+    else:
+        action = "press"
+    return MouseEvent(col - 1, row - 1, button, action, shift, alt, ctrl)
+
+
 def _modifier_prefix(params: str) -> str:
     """Translate an xterm ``;N`` modifier parameter into a key-name prefix.
 
@@ -139,6 +214,37 @@ def set_windows_ctrl_c_ignored(ignored: bool) -> None:
     _WIN_CTRL_C_IGNORED = ignored
 
 
+def enable_windows_vt_input(enabled: bool) -> None:
+    """Toggle the ENABLE_VIRTUAL_TERMINAL_INPUT console mode on Windows.
+
+    Required for mouse reporting: once enabled the console emits standard
+    SGR mouse sequences (``\\x1b[<…M``) that our parser understands. This
+    also makes Windows deliver arrow keys as ``\\x1b[A`` instead of the
+    legacy ``\\xe0H`` pair, which ``_get_key`` already handles. No-op on
+    non-Windows platforms.
+    """
+    if platform.system() != "Windows":
+        return
+    try:
+        import ctypes
+
+        kernel32 = ctypes.windll.kernel32
+        STD_INPUT_HANDLE = -10
+        ENABLE_VIRTUAL_TERMINAL_INPUT = 0x0200
+        ENABLE_EXTENDED_FLAGS = 0x0080
+        handle = kernel32.GetStdHandle(STD_INPUT_HANDLE)
+        mode = ctypes.c_uint32()
+        if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            return
+        new_mode = mode.value
+        if enabled:
+            new_mode |= ENABLE_VIRTUAL_TERMINAL_INPUT | ENABLE_EXTENDED_FLAGS
+        else:
+            new_mode &= ~ENABLE_VIRTUAL_TERMINAL_INPUT
+        kernel32.SetConsoleMode(handle, new_mode)
+    except Exception:
+        return
+
 def strip_ansi(text: str) -> str:
     """Remove ANSI escape sequences from a string."""
     if not isinstance(text, str):
@@ -154,6 +260,31 @@ def _read_unix_byte(fd: int, timeout: Optional[float] = None) -> str:
             return ""
     data = os.read(fd, 1)
     return data.decode("utf-8", errors="ignore") if data else ""
+
+
+def _read_win_byte(timeout: float = 0.02) -> str:
+    """Poll ``msvcrt.kbhit()`` for one byte, returning ``""`` on timeout."""
+    import time as _time
+
+    deadline = _time.monotonic() + timeout
+    while _time.monotonic() < deadline:
+        if msvcrt.kbhit():
+            return msvcrt.getwch()
+        _time.sleep(0.002)
+    return ""
+
+
+def _read_win_bytes_until_terminator() -> str:
+    """Accumulate a CSI body on Windows until an ASCII letter or ``~``."""
+    body = ""
+    while True:
+        nxt = _read_win_byte(0.02)
+        if not nxt:
+            break
+        body += nxt
+        if nxt.isalpha() or nxt == "~":
+            break
+    return body
 
 
 def _get_key(intercept_control: bool = False) -> str:
@@ -173,6 +304,32 @@ def _get_key(intercept_control: bool = False) -> str:
         if char in ("\xe0", "\x00"):
             extension = msvcrt.getwch()
             return _KEY_MAP_WINDOWS.get(extension, "")
+        if char == "\x1b":
+            # Distinguish a bare Escape from a VT sequence: arrow keys
+            # (``ESC [ A``), function keys (``ESC O P``) and mouse events
+            # (``ESC [ < btn ; col ; row M``). Peek for continuation bytes
+            # with a short timeout — otherwise a lone Escape would hang.
+            second = _read_win_byte(0.05)
+            if not second:
+                return "ESCAPE"
+            if second == "[":
+                body = _read_win_bytes_until_terminator()
+                if not body:
+                    return "ESCAPE"
+                final, params = body[-1], body[:-1]
+                if params.startswith("<") and final in ("M", "m"):
+                    return _parse_sgr_mouse(params[1:], final)
+                if final == "~":
+                    return _KEY_MAP_UNIX_TILDE.get(params.split(";", 1)[0], "")
+                return _KEY_MAP_UNIX_ARROWS.get(final, "")
+            if second == "O":
+                third = _read_win_byte(0.05)
+                if not third:
+                    return "ESCAPE"
+                return _KEY_MAP_UNIX_SS3.get(third, "") or _KEY_MAP_UNIX_ARROWS.get(
+                    third, ""
+                )
+            return "ESCAPE"
         mapped = _KEY_MAP_WINDOWS_REGULAR.get(char)
         return mapped if mapped is not None else char
 
@@ -234,6 +391,8 @@ def _get_key(intercept_control: bool = False) -> str:
             if not body:
                 return ""
             final, params = body[-1], body[:-1]
+            if params.startswith("<") and final in ("M", "m"):
+                return _parse_sgr_mouse(params[1:], final)
             if final == "~":
                 name = _KEY_MAP_UNIX_TILDE.get(params.split(";", 1)[0], "")
             else:
